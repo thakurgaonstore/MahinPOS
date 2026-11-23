@@ -9,6 +9,7 @@ import { resolveCustomDomain } from './utils/domainResolver';
 import './App.css';
 
 // Override global alert
+// Mahin POS Production v1.0.1 - Trigger Cloudflare Deploy
 window.alert = (msg) => {
   toast(msg, {
     duration: 4000,
