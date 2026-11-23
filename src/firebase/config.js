@@ -4,7 +4,7 @@ import { getFirestore } from 'firebase/firestore';
 
 // Primary Shared Firebase configuration loaded from environment variables
 export const primaryFirebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyB5TbdxMgsn76o1zFA790LmZ8TQ7dqRzOM",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyB5TBdxMgsn76o1zFA790LmZ8TQ7dqRzOM",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "mahinpos.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "mahinpos",
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "mahinpos.firebasestorage.app",

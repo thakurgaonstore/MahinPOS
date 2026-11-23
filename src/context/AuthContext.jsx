@@ -236,7 +236,13 @@ export const AuthProvider = ({ children }) => {
         setCurrentUser(user);
         try {
           // Check if Super Admin
-          const superAdminEmails = ['admin@mahinpos.com', 'admin@mahinerp.com', 'owner@mahinpos.com', 'mahin@pos.com'];
+          const superAdminEmails = [
+            'admin@mahinpos.com', 
+            'admin@mahinerp.com', 
+            'owner@mahinpos.com', 
+            'mahin@pos.com',
+            'mahin.webservice@gmail.com'
+          ];
           if (superAdminEmails.includes(user.email?.toLowerCase())) {
             const profile = { role: 'super_admin', email: user.email };
             setUserProfile(profile);
