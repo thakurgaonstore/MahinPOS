@@ -1,0 +1,41 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.role == 'super_admin' || 
+        request.auth.token.email in ['admin@mahinpos.com', 'admin@mahinerp.com'] ||
+        exists(/databases/$(database)/documents/platform/settings)
+      );
+    }
+    
+    // Platform global configs and metadata
+    match /platform/{document=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+    
+    // Shops / Tenants root collection
+    match /shops/{shopId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+      
+      // Subcollections under shop tenant (products, sales, customers, suppliers, expenses, staff, logs)
+      match /{subcollection}/{document=**} {
+        allow read: if true;
+        allow write: if isAuthenticated();
+      }
+    }
+    
+    // Support legacy collection fallback if needed
+    match /{document=**} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
