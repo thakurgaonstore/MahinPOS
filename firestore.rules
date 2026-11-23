@@ -1,41 +1,25 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isSuperAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.role == 'super_admin' || 
-        request.auth.token.email in ['admin@mahinpos.com', 'admin@mahinerp.com', 'mahin.webservice@gmail.com'] ||
-        exists(/databases/$(database)/documents/platform/settings)
-      );
-    }
-    
-    // Platform global configs and metadata
-    match /platform/{document=**} {
-      allow read: if true;
-      allow write: if isAuthenticated();
-    }
-    
-    // Shops / Tenants root collection
+    // All authenticated users (Super Admin, Shop Owners, Staff) can read and write
+    // Public POS/Domain resolution can read shop configurations
     match /shops/{shopId} {
       allow read: if true;
-      allow write: if isAuthenticated();
+      allow write: if request.auth != null;
       
-      // Subcollections under shop tenant (products, sales, customers, suppliers, expenses, staff, logs)
       match /{subcollection}/{document=**} {
         allow read: if true;
-        allow write: if isAuthenticated();
+        allow write: if request.auth != null;
       }
     }
-    
-    // Support legacy collection fallback if needed
+
+    match /platform/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
     match /{document=**} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
   }
 }
