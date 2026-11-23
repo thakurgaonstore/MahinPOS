@@ -1,10 +1,14 @@
+import { doc, getDoc } from 'firebase/firestore';
+import { db, defaultDb } from '../firebase/config';
+
 /**
- * Cloudinary image upload helper with client-side canvas compression
+ * Cloudinary image upload helper with client-side canvas compression and smart multi-tenant fallback
  */
 
 export const DEFAULT_CLOUDINARY_CONFIG = {
   cloudName: 'jekaqst5',
-  uploadPreset: 'school_preset' // Reusing active preset or shop_preset
+  uploadPreset: 'school_preset',
+  folder: 'mahinpos/products'
 };
 
 /**
@@ -75,18 +79,79 @@ export async function compressImage(file, { maxWidth = 800, maxHeight = 800, qua
 }
 
 /**
- * Uploads an image to Cloudinary
+ * Resolves effective Cloudinary credentials:
+ * 1. Client Shop's custom Cloudinary credentials (from shop doc)
+ * 2. If blank, Super Admin's Central Cloudinary credentials (from platform/cloudinary)
+ * 3. System Defaults
  */
-export async function uploadToCloudinary(file, customConfig = null) {
-  if (!file) throw new Error("No file provided");
+export async function resolveEffectiveCloudinaryConfig(shopId = null) {
+  // 1. Check Client Shop's own settings if shopId is provided
+  if (shopId) {
+    try {
+      const sSnap = await getDoc(doc(db, 'shops', shopId));
+      if (sSnap.exists()) {
+        const s = sSnap.data();
+        if (s.cloudinaryCloudName && s.cloudinaryUploadPreset) {
+          return {
+            cloudName: s.cloudinaryCloudName.trim(),
+            uploadPreset: s.cloudinaryUploadPreset.trim(),
+            folder: `mahinpos/${shopId}/products`,
+            isCustom: true
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("Could not check shop custom Cloudinary config:", e);
+    }
+  }
 
-  const config = customConfig && customConfig.cloudName ? customConfig : DEFAULT_CLOUDINARY_CONFIG;
+  // 2. Check Super Admin Central Cloudinary config from platform/cloudinary
+  try {
+    const pSnap = await getDoc(doc(defaultDb, 'platform', 'cloudinary'));
+    if (pSnap.exists()) {
+      const p = pSnap.data();
+      if (p.cloudName && p.imagePreset) {
+        return {
+          cloudName: p.cloudName.trim(),
+          uploadPreset: p.imagePreset.trim(),
+          folder: `mahinpos/${shopId || 'shared'}/products`,
+          isCustom: false
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Could not check platform Cloudinary config:", e);
+  }
+
+  // 3. Fallback to System Defaults
+  return {
+    ...DEFAULT_CLOUDINARY_CONFIG,
+    folder: `mahinpos/${shopId || 'shared'}/products`,
+    isCustom: false
+  };
+}
+
+/**
+ * Uploads an image to Cloudinary using canvas compression and smart multi-tenant resolution
+ */
+export async function uploadToCloudinary(file, shopIdOrConfig = null) {
+  if (!file) throw new Error("কোনো ছবি সিলেক্ট করা হয়নি");
+
+  let config;
+  if (typeof shopIdOrConfig === 'string') {
+    config = await resolveEffectiveCloudinaryConfig(shopIdOrConfig);
+  } else if (shopIdOrConfig && shopIdOrConfig.cloudName) {
+    config = shopIdOrConfig;
+  } else {
+    config = await resolveEffectiveCloudinaryConfig(null);
+  }
+
   const compressedFile = await compressImage(file);
 
   const formData = new FormData();
   formData.append('file', compressedFile);
   formData.append('upload_preset', config.uploadPreset || 'school_preset');
-  formData.append('folder', 'mahinpos/products');
+  formData.append('folder', config.folder || 'mahinpos/products');
 
   const uploadUrl = `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`;
   const response = await fetch(uploadUrl, {
@@ -96,15 +161,15 @@ export async function uploadToCloudinary(file, customConfig = null) {
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.error?.message || `Cloudinary upload failed with status ${response.status}`);
+    throw new Error(errData.error?.message || `Cloudinary upload failed: ${response.status}`);
   }
 
-  const result = await response.json();
+  const data = await response.json();
   return {
-    url: result.secure_url || result.url,
-    publicId: result.public_id,
-    width: result.width,
-    height: result.height,
-    format: result.format
+    url: data.secure_url || data.url,
+    publicId: data.public_id,
+    width: data.width,
+    height: data.height,
+    bytes: data.bytes
   };
 }

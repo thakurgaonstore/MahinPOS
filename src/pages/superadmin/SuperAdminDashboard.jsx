@@ -14,6 +14,11 @@ import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
+import {
+  testCloudinaryConnection,
+  downloadShopBackupJson,
+  backupShopToCloudinary
+} from '../../utils/tenantBackupManager';
 
 import {
   MdStorefront,
@@ -37,7 +42,12 @@ import {
   MdSettings,
   MdCheck,
   MdClose,
-  MdSend
+  MdSend,
+  MdCloudUpload,
+  MdCloudDownload,
+  MdBackup,
+  MdOutlineCloudDone,
+  MdConfirmationNumber
 } from 'react-icons/md';
 
 const SuperAdminDashboard = () => {
@@ -67,10 +77,11 @@ const SuperAdminDashboard = () => {
   const [packageTier, setPackageTier] = useState('Pro');
   const [maxProducts, setMaxProducts] = useState(1000);
   const [databaseType, setDatabaseType] = useState('Shared');
+  const [initialSmsQuota, setInitialSmsQuota] = useState(50); // Default 50 free SMS
 
-  // Broadcast & SMS State
+  // Broadcast State
   const [broadcastText, setBroadcastText] = useState('');
-  const [broadcastType, setBroadcastType] = useState('info'); // 'info' | 'warning' | 'alert'
+  const [broadcastType, setBroadcastType] = useState('info');
   const [isBroadcastActive, setIsBroadcastActive] = useState(false);
   const [savingBroadcast, setSavingBroadcast] = useState(false);
 
@@ -82,6 +93,20 @@ const SuperAdminDashboard = () => {
   const [bkashSecret, setBkashSecret] = useState('');
   const [sslStoreId, setSslStoreId] = useState('');
   const [savingGateways, setSavingGateways] = useState(false);
+
+  // Cloudinary Global Settings
+  const [cCloudName, setCCloudName] = useState('jekaqst5');
+  const [cImagePreset, setCImagePreset] = useState('school_preset');
+  const [cBackupPreset, setCBackupPreset] = useState('school_preset');
+  const [cBackupFolder, setCBackupFolder] = useState('MahinPOS_Backups');
+  const [testingCloudinary, setTestingCloudinary] = useState(false);
+  const [savingCloudinary, setSavingCloudinary] = useState(false);
+
+  // SMS Allocation Modal
+  const [smsModalShop, setSmsModalShop] = useState(null);
+  const [smsNewBalance, setSmsNewBalance] = useState(0);
+  const [smsNewStatus, setSmsNewStatus] = useState('Active');
+  const [updatingSms, setUpdatingSms] = useState(false);
 
   // Dedicated DB Config Form
   const [selectedShopForDb, setSelectedShopForDb] = useState('');
@@ -108,7 +133,7 @@ const SuperAdminDashboard = () => {
       }
     );
 
-    // Fetch Broadcast & Gateway Settings
+    // Fetch Broadcast, Gateway & Cloudinary Settings
     const fetchGlobalConfigs = async () => {
       try {
         const bSnap = await getDoc(doc(db, 'platform', 'broadcast'));
@@ -128,6 +153,15 @@ const SuperAdminDashboard = () => {
           setBkashAppKey(gData.bkashAppKey || '');
           setBkashSecret(gData.bkashSecret || '');
           setSslStoreId(gData.sslStoreId || '');
+        }
+
+        const cSnap = await getDoc(doc(db, 'platform', 'cloudinary'));
+        if (cSnap.exists()) {
+          const cData = cSnap.data();
+          setCCloudName(cData.cloudName || 'jekaqst5');
+          setCImagePreset(cData.imagePreset || 'school_preset');
+          setCBackupPreset(cData.backupPreset || 'school_preset');
+          setCBackupFolder(cData.backupFolder || 'MahinPOS_Backups');
         }
       } catch (e) {
         console.warn("Global configs fetch note:", e);
@@ -170,6 +204,8 @@ const SuperAdminDashboard = () => {
         packageTier,
         maxProducts: Number(maxProducts) || 1000,
         databaseType,
+        smsBalance: Number(initialSmsQuota) || 50,
+        smsStatus: 'Active',
         status: 'Active',
         createdAt: serverTimestamp()
       };
@@ -233,6 +269,104 @@ const SuperAdminDashboard = () => {
     } catch (e) {
       console.error(e);
       toast.error('দোকান মুছতে ব্যর্থ হয়েছে');
+    }
+  };
+
+  // Open SMS Allocation Modal
+  const openSmsModal = (shop) => {
+    setSmsModalShop(shop);
+    setSmsNewBalance(shop.smsBalance !== undefined ? Number(shop.smsBalance) : 0);
+    setSmsNewStatus(shop.smsStatus || 'Active');
+  };
+
+  // Save SMS Allocation
+  const handleSaveSmsAllocation = async (e) => {
+    e.preventDefault();
+    if (!smsModalShop) return;
+    setUpdatingSms(true);
+    try {
+      await updateDoc(doc(db, 'shops', smsModalShop.id), {
+        smsBalance: Number(smsNewBalance),
+        smsStatus: smsNewStatus,
+        lastSmsAllocatedAt: serverTimestamp()
+      });
+      toast.success(`"${smsModalShop.shopName || smsModalShop.name}" দোকানে এসএমএস কোটা আপডেট হয়েছে!`);
+      setSmsModalShop(null);
+    } catch (err) {
+      console.error(err);
+      toast.error('এসএমএস বরাদ্দ সংরক্ষণ ব্যর্থ');
+    } finally {
+      setUpdatingSms(false);
+    }
+  };
+
+  // Admin 1-Click JSON Backup
+  const handleAdminDownloadBackup = async (shop) => {
+    try {
+      toast.loading(`"${shop.shopName || shop.name}" ডেটা প্রস্তুত হচ্ছে...`);
+      const res = await downloadShopBackupJson(shop.id, shop.shopName || shop.name);
+      toast.dismiss();
+      toast.success(`ব্যাকআপ ফাইল "${res.fileName}" ডাউনলোড হয়েছে!`);
+    } catch (e) {
+      toast.dismiss();
+      console.error(e);
+      toast.error(e.message || 'ব্যাকআপ তৈরি ব্যর্থ');
+    }
+  };
+
+  // Admin 1-Click Cloudinary Backup
+  const handleAdminCloudinaryBackup = async (shop) => {
+    try {
+      toast.loading(`Cloudinary-তে "${shop.shopName || shop.name}" ব্যাকআপ নেওয়া হচ্ছে...`);
+      const res = await backupShopToCloudinary(shop.id, shop.shopName || shop.name, {
+        cloudName: cCloudName,
+        uploadPreset: cBackupPreset,
+        folder: cBackupFolder
+      });
+      toast.dismiss();
+      toast.success(`সফল! Cloudinary ক্লাউডে সংরক্ষিত হয়েছে: ${res.fileName}`);
+    } catch (e) {
+      toast.dismiss();
+      console.error(e);
+      toast.error(e.message || 'ক্লাউড ব্যাকআপ ব্যর্থ');
+    }
+  };
+
+  // Save Cloudinary Global Settings
+  const handleSaveCloudinary = async (e) => {
+    e.preventDefault();
+    setSavingCloudinary(true);
+    try {
+      await setDoc(doc(db, 'platform', 'cloudinary'), {
+        cloudName: cCloudName.trim(),
+        imagePreset: cImagePreset.trim(),
+        backupPreset: cBackupPreset.trim(),
+        backupFolder: cBackupFolder.trim(),
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      toast.success('গ্লোবাল Cloudinary প্রিসেট ও ব্যাকআপ সেটিংস সংরক্ষিত হয়েছে!');
+    } catch (e) {
+      console.error(e);
+      toast.error('Cloudinary সেটিংস সেভ করতে সমস্যা হয়েছে');
+    } finally {
+      setSavingCloudinary(false);
+    }
+  };
+
+  // Test Cloudinary Connection
+  const handleTestCloudinary = async () => {
+    setTestingCloudinary(true);
+    toast.loading('Cloudinary ক্লাউড ব্যাকআপ সংযোগ পরীক্ষা করা হচ্ছে...');
+    try {
+      const res = await testCloudinaryConnection(cCloudName, cBackupPreset, cBackupFolder);
+      toast.dismiss();
+      toast.success(res.message);
+    } catch (e) {
+      toast.dismiss();
+      console.error(e);
+      toast.error(e.message || 'Cloudinary সংযোগ ব্যর্থ হয়েছে');
+    } finally {
+      setTestingCloudinary(false);
     }
   };
 
@@ -358,7 +492,7 @@ const SuperAdminDashboard = () => {
         </div>
       </div>
 
-      {/* System Health & Cloudflare Workers Connection */}
+      {/* System Health */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '24px' }}>
         <div style={{ background: '#fff', padding: '20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
           <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -374,8 +508,8 @@ const SuperAdminDashboard = () => {
               <span style={{ color: '#059669', fontWeight: '700' }}>● সংযুক্ত (mahinpos)</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '8px', borderBottom: '1px solid #f1f5f9' }}>
-              <span style={{ color: '#64748b' }}>Cloudflare Worker Gateway:</span>
-              <span style={{ color: '#2563eb', fontWeight: '700' }}>● mahinpos.thakurgaonstore.workers.dev</span>
+              <span style={{ color: '#64748b' }}>Cloudinary ক্লাউড স্টোরেজ:</span>
+              <span style={{ color: '#7c3aed', fontWeight: '700' }}>● সচল ({cCloudName})</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748b' }}>সুপার এডমিন একাউন্ট:</span>
@@ -424,7 +558,7 @@ const SuperAdminDashboard = () => {
             সাম্প্রতিক অনবোর্ড করা দোকান
           </h3>
           <Link to="/super-admin/shops" style={{ fontSize: '13px', color: '#2563eb', textDecoration: 'none', fontWeight: '700' }}>
-            সকল দোকান দেখুন ({shops.length}) →
+            সকল দোকান ও ক্লায়েন্ট পরিচালনা ({shops.length}) →
           </Link>
         </div>
         {renderShopsTable(shops.slice(0, 5))}
@@ -439,7 +573,7 @@ const SuperAdminDashboard = () => {
     <div>
       {renderHeader(
         'দোকান ও ক্লায়েন্ট তালিকা',
-        'প্ল্যাটফর্মে নিবন্ধিত সকল দোকান, প্যাকেজ ও প্রবেশাধিকার নিয়ন্ত্রণ',
+        'প্ল্যাটফর্মে নিবন্ধিত সকল দোকান, এসএমএস কোটা বরাদ্দ, ব্যাকআপ ও ১-ক্লিক প্রবেশ',
         <button
           onClick={() => setIsAddModalOpen(true)}
           style={{
@@ -526,111 +660,181 @@ const SuperAdminDashboard = () => {
             <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b' }}>দোকানের নাম</th>
             <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b' }}>মালিকের তথ্য</th>
             <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b' }}>প্যাকেজ</th>
-            <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b' }}>ডেটাবেস মোড</th>
+            <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b', textAlign: 'center' }}>💬 এসএমএস কোটা</th>
             <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b' }}>স্ট্যাটাস</th>
             <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b', textAlign: 'center' }}>⚡ ১-ক্লিক প্রবেশ</th>
+            <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b', textAlign: 'center' }}>ব্যাকআপ</th>
             <th style={{ padding: '12px 10px', fontSize: '13px', color: '#64748b', textAlign: 'center' }}>অ্যাকশন</th>
           </tr>
         </thead>
         <tbody>
-          {list.map((s) => (
-            <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
-              <td style={{ padding: '12px 10px' }}>
-                <span style={{ fontFamily: 'monospace', fontWeight: '700', color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '4px' }}>
-                  {s.id}
-                </span>
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <div style={{ fontWeight: '700', color: '#0f172a' }}>{s.shopName || s.name}</div>
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <div style={{ fontSize: '13px', color: '#334155' }}>{s.ownerEmail}</div>
-                {s.phone && <div style={{ fontSize: '12px', color: '#64748b' }}>{s.phone}</div>}
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '600' }}>
-                  {s.packageTier || 'Pro'}
-                </span>
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <span style={{ fontSize: '12px', color: s.databaseType === 'Dedicated' ? '#7c3aed' : '#64748b', fontWeight: s.databaseType === 'Dedicated' ? '700' : '400' }}>
-                  {s.databaseType === 'Dedicated' ? '⚡ Dedicated DB' : 'Shared Cloud'}
-                </span>
-              </td>
-              <td style={{ padding: '12px 10px' }}>
-                <span style={{
-                  padding: '3px 10px',
-                  borderRadius: '12px',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  background: s.status === 'Suspended' ? '#fee2e2' : '#ecfdf5',
-                  color: s.status === 'Suspended' ? '#dc2626' : '#059669'
-                }}>
-                  {s.status === 'Suspended' ? 'স্থগিত' : 'সক্রিয়'}
-                </span>
-              </td>
-              <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                <button
-                  onClick={() => handleImpersonate(s)}
-                  style={{
-                    padding: '7px 14px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
-                    color: '#ffffff',
-                    fontSize: '12px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)'
-                  }}
-                >
-                  <MdLogin size={15} /> প্রবেশ করুন (POS)
-                </button>
-              </td>
-              <td style={{ padding: '12px 10px', textAlign: 'center' }}>
-                <div style={{ display: 'inline-flex', gap: '6px' }}>
-                  <button
-                    onClick={() => toggleShopStatus(s)}
-                    title={s.status === 'Suspended' ? 'সক্রিয় করুন' : 'স্থগিত করুন'}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: '5px',
-                      border: '1px solid',
-                      borderColor: s.status === 'Suspended' ? '#a7f3d0' : '#fecaca',
-                      background: s.status === 'Suspended' ? '#ecfdf5' : '#fee2e2',
-                      color: s.status === 'Suspended' ? '#059669' : '#dc2626',
+          {list.map((s) => {
+            const smsBal = s.smsBalance !== undefined ? Number(s.smsBalance) : 0;
+            const smsActive = s.smsStatus !== 'Suspended';
+            return (
+              <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                <td style={{ padding: '12px 10px' }}>
+                  <span style={{ fontFamily: 'monospace', fontWeight: '700', color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '4px' }}>
+                    {s.id}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 10px' }}>
+                  <div style={{ fontWeight: '700', color: '#0f172a' }}>{s.shopName || s.name}</div>
+                  <div style={{ fontSize: '11px', color: s.databaseType === 'Dedicated' ? '#7c3aed' : '#64748b' }}>
+                    {s.databaseType === 'Dedicated' ? '⚡ Dedicated DB' : 'Shared Cloud'}
+                  </div>
+                </td>
+                <td style={{ padding: '12px 10px' }}>
+                  <div style={{ fontSize: '13px', color: '#334155' }}>{s.ownerEmail}</div>
+                  {s.phone && <div style={{ fontSize: '12px', color: '#64748b' }}>{s.phone}</div>}
+                </td>
+                <td style={{ padding: '12px 10px' }}>
+                  <span style={{ background: '#f8fafc', border: '1px solid #e2e8f0', color: '#334155', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '600' }}>
+                    {s.packageTier || 'Pro'}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                  <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: '10px',
                       fontSize: '12px',
-                      fontWeight: '600',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {s.status === 'Suspended' ? 'সক্রিয়' : 'স্থগিত'}
-                  </button>
+                      fontWeight: '800',
+                      background: smsBal > 0 ? '#ecfdf5' : '#fee2e2',
+                      color: smsBal > 0 ? '#059669' : '#dc2626',
+                      border: '1px solid',
+                      borderColor: smsBal > 0 ? '#a7f3d0' : '#fecaca'
+                    }}>
+                      {smsBal} টি {smsActive ? '' : '(স্থগিত)'}
+                    </span>
+                    <button
+                      onClick={() => openSmsModal(s)}
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #cbd5e1',
+                        background: '#fff',
+                        color: '#2563eb',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      বরাদ্দ পরিবর্তন
+                    </button>
+                  </div>
+                </td>
+                <td style={{ padding: '12px 10px' }}>
+                  <span style={{
+                    padding: '3px 10px',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    background: s.status === 'Suspended' ? '#fee2e2' : '#ecfdf5',
+                    color: s.status === 'Suspended' ? '#dc2626' : '#059669'
+                  }}>
+                    {s.status === 'Suspended' ? 'স্থগিত' : 'সক্রিয়'}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 10px', textAlign: 'center' }}>
                   <button
-                    onClick={() => handleDeleteShop(s)}
-                    title="দোকান মুছুন"
+                    onClick={() => handleImpersonate(s)}
                     style={{
-                      padding: '5px 8px',
-                      borderRadius: '5px',
-                      border: '1px solid #fee2e2',
-                      background: '#fff',
-                      color: '#ef4444',
-                      cursor: 'pointer'
+                      padding: '7px 14px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #2563eb, #1d4ed8)',
+                      color: '#ffffff',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: '0 2px 6px rgba(37, 99, 235, 0.25)'
                     }}
                   >
-                    <MdDelete size={16} />
+                    <MdLogin size={15} /> প্রবেশ করুন (POS)
                   </button>
-                </div>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                  <div style={{ display: 'inline-flex', gap: '4px' }}>
+                    <button
+                      onClick={() => handleAdminDownloadBackup(s)}
+                      title="JSON ব্যাকআপ ফাইল ডাউনলোড করুন"
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #cbd5e1',
+                        background: '#fff',
+                        color: '#0f172a',
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <MdCloudDownload size={14} style={{ verticalAlign: 'middle', marginRight: '2px' }} /> JSON
+                    </button>
+                    <button
+                      onClick={() => handleAdminCloudinaryBackup(s)}
+                      title="Cloudinary-তে ক্লাউড ব্যাকআপ নিন"
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '4px',
+                        border: 'none',
+                        background: '#7c3aed',
+                        color: '#fff',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <MdCloudUpload size={14} style={{ verticalAlign: 'middle', marginRight: '2px' }} /> ক্লাউড
+                    </button>
+                  </div>
+                </td>
+                <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                  <div style={{ display: 'inline-flex', gap: '6px' }}>
+                    <button
+                      onClick={() => toggleShopStatus(s)}
+                      title={s.status === 'Suspended' ? 'সক্রিয় করুন' : 'স্থগিত করুন'}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '5px',
+                        border: '1px solid',
+                        borderColor: s.status === 'Suspended' ? '#a7f3d0' : '#fecaca',
+                        background: s.status === 'Suspended' ? '#ecfdf5' : '#fee2e2',
+                        color: s.status === 'Suspended' ? '#059669' : '#dc2626',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {s.status === 'Suspended' ? 'সক্রিয়' : 'স্থগিত'}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteShop(s)}
+                      title="দোকান মুছুন"
+                      style={{
+                        padding: '5px 8px',
+                        borderRadius: '5px',
+                        border: '1px solid #fee2e2',
+                        background: '#fff',
+                        color: '#ef4444',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <MdDelete size={16} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
 
           {list.length === 0 && (
             <tr>
-              <td colSpan="8" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+              <td colSpan="9" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
                 {loadingShops ? 'দোকানের তালিকা লোড হচ্ছে...' : 'কোনো দোকান পাওয়া যায়নি'}
               </td>
             </tr>
@@ -770,10 +974,10 @@ const SuperAdminDashboard = () => {
         {/* SMS Gateway Card */}
         <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
           <h3 style={{ fontSize: '17px', fontWeight: '800', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MdSms color="#059669" size={22} /> বাংলাদেশি এসএমএস গেটওয়ে (SMS Gateway)
+            <MdSms color="#059669" size={22} /> সেন্ট্রাল এসএমএস গেটওয়ে (Master SMS Gateway)
           </h3>
           <p style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.6', marginBottom: '16px' }}>
-            কাস্টমার বিলিং, বকেয়া রিমাইন্ডার ও পয়েন্ট আপডেটে স্বয়ংক্রিয় এসএমএস পাঠানোর সেটিংস।
+            যেসব ক্লায়েন্টের নিজস্ব এপিআই নেই, তারা সুপার এডমিনের এই সেন্ট্রাল গেটওয়ের মাধ্যমে এসএমএস পাঠাবে (বরাদ্দকৃত কোটা থেকে)।
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -791,7 +995,7 @@ const SuperAdminDashboard = () => {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>API Key / Token</label>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Master API Key / Token</label>
               <input
                 type="text"
                 placeholder="API Key দিন"
@@ -802,7 +1006,7 @@ const SuperAdminDashboard = () => {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Sender ID / Masking Name</label>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Master Sender ID / Masking</label>
               <input
                 type="text"
                 placeholder="যেমন: MahinPOS বা 8809612..."
@@ -813,7 +1017,7 @@ const SuperAdminDashboard = () => {
             </div>
 
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', fontSize: '12px', color: '#64748b' }}>
-              💡 টিপস: ক্লাউডফ্লেয়ার ওয়ার্কার গেটওয়ে (`worker.js`) এই সেটিংস ব্যবহার করে নিরাপদে এসএমএস ডেলিভারি করবে।
+              💡 টিপস: ক্লাউডফ্লেয়ার ওয়ার্কার গেটওয়ে (`worker.js`) এই সেটিংস ব্যবহার করে এসএমএস ডেলিভারি করবে।
             </div>
           </div>
         </div>
@@ -1069,7 +1273,7 @@ const SuperAdminDashboard = () => {
     <div>
       {renderHeader(
         'অডিট ও অ্যাক্টিভিটি লগ',
-        'সুপার এডমিন লগইন, দোকান তৈরি ও কনফিগারেশন পরিবর্তনের হিস্টোরি'
+        'সুপার এডমিন লগইন, দোকান তৈরি, এসএমএস বরাদ্দ ও কনফিগারেশন পরিবর্তনের হিস্টোরি'
       )}
 
       <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
@@ -1081,9 +1285,9 @@ const SuperAdminDashboard = () => {
           {shops.map((s) => (
             <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderRadius: '8px', background: '#f8fafc', fontSize: '13px' }}>
               <div>
-                <span style={{ fontWeight: '700', color: '#0f172a' }}>নতুন দোকান অনবোর্ড: </span>
+                <span style={{ fontWeight: '700', color: '#0f172a' }}>দোকান রেকর্ড: </span>
                 <span style={{ color: '#2563eb', fontWeight: '600' }}>{s.shopName || s.name} ({s.id})</span>
-                <span style={{ color: '#64748b', marginLeft: '8px' }}>- প্যাকেজ: {s.packageTier}</span>
+                <span style={{ color: '#64748b', marginLeft: '8px' }}>- কোটা: {s.smsBalance || 0} এসএমএস</span>
               </div>
               <div style={{ color: '#94a3b8', fontSize: '12px' }}>
                 স্ট্যাটাস: <b style={{ color: s.status === 'Suspended' ? '#dc2626' : '#059669' }}>{s.status}</b>
@@ -1110,55 +1314,162 @@ const SuperAdminDashboard = () => {
     <div>
       {renderHeader(
         'সিস্টেম সেটিংস ও নিরাপত্তা',
-        'প্ল্যাটফর্মের গ্লোবাল সেটিংস, অনুমোদিত সুপার এডমিন তালিকা ও সিস্টেম ক্যাশ নিয়ন্ত্রণ'
+        'গ্লোবাল Cloudinary প্রিসেট, ডেটা ব্যাকআপ কনফিগারেশন ও সিস্টেম ক্যাশ নিয়ন্ত্রণ'
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
+        {/* Global Cloudinary Preset Settings */}
         <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MdSecurity color="#2563eb" size={20} /> অনুমোদিত সুপার এডমিন ইমেইল
-          </h3>
-          <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px', lineHeight: '1.5' }}>
-            নিম্নলিখিত ইমেইলগুলো সুপার এডমিন প্রিভিলেজ নিয়ে সম্পূর্ণ প্ল্যাটফর্ম কন্ট্রোল করার অনুমতিপ্রাপ্ত:
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
-            <div style={{ padding: '8px 12px', background: '#eff6ff', borderRadius: '6px', color: '#1e40af', fontWeight: '700' }}>
-              ✓ mahin.webservice@gmail.com (Primary Super Admin)
-            </div>
-            <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', color: '#475569', fontWeight: '600' }}>
-              ✓ admin@mahinpos.com
-            </div>
-            <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', color: '#475569', fontWeight: '600' }}>
-              ✓ admin@mahinerp.com
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <h3 style={{ fontSize: '16px', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MdCloudUpload color="#7c3aed" size={22} /> গ্লোবাল Cloudinary প্রিসেট ও ব্যাকআপ
+            </h3>
+            <span style={{ background: '#f5f3ff', color: '#7c3aed', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>
+              সেন্ট্রাল স্টোরেজ
+            </span>
           </div>
+
+          <p style={{ fontSize: '13px', color: '#64748b', lineHeight: '1.5', marginBottom: '16px' }}>
+            যেসব ক্লায়েন্ট নিজস্ব Cloudinary প্রিসেট দিবে না, তাদের পণ্যের ছবি এবং সমস্ত ডেটা ব্যাকআপ আপনার এই সেন্ট্রাল Cloudinary স্টোরেজে আইডি অনুযায়ী সেভ হবে।
+          </p>
+
+          <form onSubmit={handleSaveCloudinary} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Cloudinary Cloud Name *</label>
+              <input
+                type="text"
+                value={cCloudName}
+                onChange={(e) => setCCloudName(e.target.value)}
+                placeholder="jekaqst5"
+                required
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Image Upload Preset *</label>
+              <input
+                type="text"
+                value={cImagePreset}
+                onChange={(e) => setCImagePreset(e.target.value)}
+                placeholder="school_preset বা image_preset"
+                required
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Data Backup Upload Preset *</label>
+              <input
+                type="text"
+                value={cBackupPreset}
+                onChange={(e) => setCBackupPreset(e.target.value)}
+                placeholder="school_preset বা backup_preset"
+                required
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '4px' }}>Backup Target Folder</label>
+              <input
+                type="text"
+                value={cBackupFolder}
+                onChange={(e) => setCBackupFolder(e.target.value)}
+                placeholder="MahinPOS_Backups"
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+              />
+              <span style={{ fontSize: '11px', color: '#64748b' }}>Cloudinary ফোল্ডার স্ট্রাকচার: `MahinPOS_Backups/&#123;shopId&#125;/&#123;timestamp&#125;.json`</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+              <button
+                type="button"
+                onClick={handleTestCloudinary}
+                disabled={testingCloudinary}
+                style={{
+                  flex: 1,
+                  padding: '9px',
+                  borderRadius: '6px',
+                  border: '1px solid #7c3aed',
+                  background: '#fff',
+                  color: '#7c3aed',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                {testingCloudinary ? 'পরীক্ষা হচ্ছে...' : '⚡ সংযোগ টেস্ট করুন'}
+              </button>
+              <button
+                type="submit"
+                disabled={savingCloudinary}
+                style={{
+                  flex: 1,
+                  padding: '9px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#7c3aed',
+                  color: '#fff',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                {savingCloudinary ? 'সংরক্ষণ...' : 'সেটিংস সেভ করুন'}
+              </button>
+            </div>
+          </form>
         </div>
 
-        <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MdSettings color="#64748b" size={20} /> সিস্টেম ক্যাশ ও স্টোরেজ
-          </h3>
-          <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px', lineHeight: '1.5' }}>
-            প্রয়োজনে স্থানীয় ব্রাউজার সেশন ও ক্যাশ রিসেট করুন:
-          </p>
-          <button
-            onClick={() => {
-              sessionStorage.clear();
-              localStorage.removeItem('impersonationSession_pos');
-              toast.success('স্থানীয় ক্যাশ পরিষ্কার করা হয়েছে!');
-            }}
-            style={{
-              padding: '10px 16px',
-              borderRadius: '6px',
-              border: '1px solid #cbd5e1',
-              background: '#fff',
-              color: '#334155',
-              fontWeight: '700',
-              cursor: 'pointer'
-            }}
-          >
-            ব্রাউজার ক্যাশ রিসেট করুন
-          </button>
+        {/* Super Admin Whitelist & Storage Info */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+            <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MdSecurity color="#2563eb" size={20} /> অনুমোদিত সুপার এডমিন ইমেইল
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px', lineHeight: '1.5' }}>
+              নিম্নলিখিত ইমেইলগুলো সুপার এডমিন প্রিভিলেজ নিয়ে সম্পূর্ণ প্ল্যাটফর্ম কন্ট্রোল করার অনুমতিপ্রাপ্ত:
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '13px' }}>
+              <div style={{ padding: '8px 12px', background: '#eff6ff', borderRadius: '6px', color: '#1e40af', fontWeight: '700' }}>
+                ✓ mahin.webservice@gmail.com (Primary Super Admin)
+              </div>
+              <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', color: '#475569', fontWeight: '600' }}>
+                ✓ admin@mahinpos.com
+              </div>
+              <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', color: '#475569', fontWeight: '600' }}>
+                ✓ admin@mahinerp.com
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+            <h3 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MdSettings color="#64748b" size={20} /> সিস্টেম ক্যাশ ও স্টোরেজ
+            </h3>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px', lineHeight: '1.5' }}>
+              প্রয়োজনে স্থানীয় ব্রাউজার সেশন ও ক্যাশ রিসেট করুন:
+            </p>
+            <button
+              onClick={() => {
+                sessionStorage.clear();
+                localStorage.removeItem('impersonationSession_pos');
+                toast.success('স্থানীয় ক্যাশ পরিষ্কার করা হয়েছে!');
+              }}
+              style={{
+                padding: '10px 16px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: '#fff',
+                color: '#334155',
+                fontWeight: '700',
+                cursor: 'pointer'
+              }}
+            >
+              ব্রাউজার ক্যাশ রিসেট করুন
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1176,7 +1487,108 @@ const SuperAdminDashboard = () => {
       {currentPath === '/super-admin/audit-logs' && renderAuditLogsView()}
       {currentPath === '/super-admin/settings' && renderSettingsView()}
 
-      {/* Onboard New Shop Modal (Shared across views) */}
+      {/* SMS Quota Allocation Modal */}
+      {smsModalShop && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.6)',
+          zIndex: 10000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '440px', borderRadius: '14px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: '800', margin: 0, color: '#0f172a' }}>
+                💬 এসএমএস কোটা বরাদ্দ ও নিয়ন্ত্রণ
+              </h3>
+              <button onClick={() => setSmsModalShop(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}>
+                <MdClose size={22} />
+              </button>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '16px' }}>
+              দোকান: <b>{smsModalShop.shopName || smsModalShop.name}</b> ({smsModalShop.id})
+            </div>
+
+            <form onSubmit={handleSaveSmsAllocation} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px' }}>
+                  এসএমএস ব্যালেন্স (সংখ্যা)
+                </label>
+                <input
+                  type="number"
+                  value={smsNewBalance}
+                  onChange={(e) => setSmsNewBalance(e.target.value)}
+                  required
+                  min="0"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: '700' }}
+                />
+              </div>
+
+              {/* Quick Add Pills */}
+              <div>
+                <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>কুইক অ্যাড:</span>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                  {[50, 100, 500, 1000].map(amt => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setSmsNewBalance(prev => Number(prev) + amt)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        background: '#f1f5f9',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      +{amt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px' }}>
+                  এসএমএস সার্ভিস স্ট্যাটাস
+                </label>
+                <select
+                  value={smsNewStatus}
+                  onChange={(e) => setSmsNewStatus(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                >
+                  <option value="Active">সক্রিয় (Active) - এসএমএস পাঠানো যাবে</option>
+                  <option value="Suspended">স্থগিত (Suspended) - এসএমএস সার্ভিস ব্লক থাকবে</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setSmsModalShop(null)}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingSms}
+                  style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', background: '#2563eb', color: '#fff', fontWeight: '700' }}
+                >
+                  {updatingSms ? 'সেভ হচ্ছে...' : 'বরাদ্দ নিশ্চিত করুন'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Onboard New Shop Modal */}
       {isAddModalOpen && (
         <div style={{
           position: 'fixed',
@@ -1287,15 +1699,13 @@ const SuperAdminDashboard = () => {
                 </div>
 
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px', color: '#334155' }}>ডেটাবেস টাইপ</label>
-                  <select
-                    value={databaseType}
-                    onChange={(e) => setDatabaseType(e.target.value)}
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px', color: '#334155' }}>প্রাথমিক ফ্রি এসএমএস কোটা</label>
+                  <input
+                    type="number"
+                    value={initialSmsQuota}
+                    onChange={(e) => setInitialSmsQuota(e.target.value)}
                     style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '14px' }}
-                  >
-                    <option value="Shared">Shared MahinPOS DB</option>
-                    <option value="Dedicated">Dedicated Firebase DB</option>
-                  </select>
+                  />
                 </div>
               </div>
 
