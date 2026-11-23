@@ -1,7 +1,7 @@
 import { db, defaultDb } from '../firebase/config';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
-export const CLOUDFLARE_GATEWAY_URL = import.meta.env.VITE_WORKER_GATEWAY_URL || 'https://mahinpos-gateway.workers.dev';
+export const CLOUDFLARE_GATEWAY_URL = import.meta.env.VITE_WORKER_GATEWAY_URL || 'https://mahinpos.thakurgaonstore.workers.dev';
 
 let isBulkSmsBdIpBlocked = false;
 
