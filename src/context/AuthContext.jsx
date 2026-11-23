@@ -58,12 +58,26 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   // Email & Password login for Super Admin or Shop Owner
-  const login = (email, password) => {
+  const login = async (email, password) => {
     sessionStorage.removeItem('impersonationSession_pos');
     localStorage.removeItem('impersonationSession_pos');
     localStorage.removeItem('staffAuth_pos');
     localStorage.removeItem('adminProfile_pos');
-    return signInWithEmailAndPassword(auth, email, password);
+    const cred = await signInWithEmailAndPassword(auth, email, password);
+    const superAdminEmails = [
+      'admin@mahinpos.com', 
+      'admin@mahinerp.com', 
+      'owner@mahinpos.com', 
+      'mahin@pos.com',
+      'mahin.webservice@gmail.com'
+    ];
+    if (cred.user && superAdminEmails.includes(cred.user.email?.toLowerCase())) {
+      const profile = { role: 'super_admin', email: cred.user.email };
+      setUserProfile(profile);
+      setCurrentUser(cred.user);
+      localStorage.setItem('adminProfile_pos', JSON.stringify(profile));
+    }
+    return cred;
   };
 
   // Staff login for Cashier, Manager, Accountant using Shop Code + Phone + Password

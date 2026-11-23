@@ -7,12 +7,11 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   const { currentUser, userProfile, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) {
-    return <PageLoader />;
+  if (loading || (currentUser && !userProfile)) {
+    return <PageLoader message="প্রোফাইল পারমিশন লোড হচ্ছে..." />;
   }
 
   if (!currentUser) {
-    // If attempting to access super admin, send to /mahinerp, else /poserp
     const redirectPath = location.pathname.startsWith('/super-admin') ? '/mahinerp' : '/poserp';
     return <Navigate to={redirectPath} state={{ from: location }} replace />;
   }
