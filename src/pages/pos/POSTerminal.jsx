@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  collection, 
-  query, 
-  onSnapshot, 
-  doc, 
-  addDoc, 
-  updateDoc, 
-  increment, 
+import {
+  collection,
+  query,
+  onSnapshot,
+  doc,
+  addDoc,
+  updateDoc,
+  increment,
   serverTimestamp,
   getDoc
 } from 'firebase/firestore';
@@ -96,7 +96,7 @@ const POSTerminal = () => {
       gain.gain.setValueAtTime(0.2, ctx.currentTime);
       osc.start();
       osc.stop(ctx.currentTime + 0.1);
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // Realtime Listeners
@@ -333,7 +333,7 @@ const POSTerminal = () => {
 
   // Calculations
   const subtotal = cart.reduce((acc, item) => acc + item.total, 0);
-  
+
   let calculatedDiscount = 0;
   if (discountType === 'percent') {
     calculatedDiscount = (subtotal * (Number(discountVal) || 0)) / 100;

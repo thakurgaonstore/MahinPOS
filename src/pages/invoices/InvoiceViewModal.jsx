@@ -368,6 +368,12 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
                       <span>{formatCurrency(invoice.changeReturn)}</span>
                     </div>
                   )}
+                  {invoice.totalRefundAmount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px', color: '#dc2626', fontWeight: '800' }}>
+                      <span>পণ্য রিটার্ন রিফান্ড:</span>
+                      <span>- {formatCurrency(invoice.totalRefundAmount)}</span>
+                    </div>
+                  )}
                   {invoice.dueAmount > 0 && (
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px', color: '#dc2626', fontWeight: '800' }}>
                       <span>বাকি পাওনা:</span>
@@ -503,6 +509,12 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
                       <span>সর্বমোট টাকা:</span>
                       <span>{formatCurrency(invoice.grandTotal)}</span>
                     </div>
+                    {invoice.totalRefundAmount > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626', fontWeight: '800' }}>
+                        <span>পণ্য রিটার্ন রিফান্ড:</span>
+                        <span>- {formatCurrency(invoice.totalRefundAmount)}</span>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>জমা / ক্যাশ গ্রহণ:</span>
                       <span>{formatCurrency(invoice.paidAmount)}</span>
@@ -646,6 +658,12 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
                       <span>সর্বমোট প্রদেয়:</span>
                       <span style={{ color: '#2563eb' }}>{formatCurrency(invoice.grandTotal)}</span>
                     </div>
+                    {invoice.totalRefundAmount > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', color: '#dc2626', fontWeight: '800', marginTop: '4px' }}>
+                        <span>পণ্য রিটার্ন রিফান্ড:</span>
+                        <span>- {formatCurrency(invoice.totalRefundAmount)}</span>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px' }}>
                       <span>পরিশোধ করা হয়েছে:</span>
                       <span>{formatCurrency(invoice.paidAmount)}</span>

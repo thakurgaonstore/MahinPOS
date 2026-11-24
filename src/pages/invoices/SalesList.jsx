@@ -1,10 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, getDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, getDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
 import InvoiceViewModal from './InvoiceViewModal';
-import { MdSearch, MdPrint, MdReceipt, MdFileDownload, MdFilterList } from 'react-icons/md';
+import ProductReturnModal from './ProductReturnModal';
+import {
+  MdSearch,
+  MdPrint,
+  MdFileDownload,
+  MdAssignmentReturn,
+  MdCalendarToday,
+  MdTrendingUp,
+  MdCheckCircle,
+  MdDateRange
+} from 'react-icons/md';
 import * as XLSX from 'xlsx';
 
 const SalesList = () => {
@@ -14,14 +24,23 @@ const SalesList = () => {
   const [sales, setSales] = useState([]);
   const [search, setSearch] = useState('');
   const [filterPayment, setFilterPayment] = useState('All');
+  const [timeFilter, setTimeFilter] = useState('today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
   const [viewInvoice, setViewInvoice] = useState(null);
+  const [returnInvoice, setReturnInvoice] = useState(null);
   const [shopConfig, setShopConfig] = useState(null);
 
   useEffect(() => {
     if (!shopId) return;
 
+    // Firebase Spark Plan Optimization:
+    // Limit to latest 150-300 records to save Firestore reads
+    const fetchLimit = timeFilter === 'all' ? 300 : 150;
     const ref = collection(db, 'shops', shopId, 'sales');
-    const q = query(ref, orderBy('createdAt', 'desc'));
+    const q = query(ref, orderBy('createdAt', 'desc'), limit(fetchLimit));
+
     const unsub = onSnapshot(q, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -35,9 +54,34 @@ const SalesList = () => {
     fetchConfig();
 
     return () => unsub();
-  }, [shopId]);
+  }, [shopId, timeFilter]);
+
+  // Date Filtering logic
+  const now = new Date();
+  const isMatchDate = (d) => {
+    if (!d) return true;
+    const date = d.toDate ? d.toDate() : new Date(d);
+    if (isNaN(date.getTime())) return true;
+
+    if (timeFilter === 'today') {
+      return date.toDateString() === now.toDateString();
+    }
+    if (timeFilter === 'month') {
+      return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    }
+    if (timeFilter === 'year') {
+      return date.getFullYear() === now.getFullYear();
+    }
+    if (timeFilter === 'custom') {
+      if (customStartDate && date < new Date(customStartDate + 'T00:00:00')) return false;
+      if (customEndDate && date > new Date(customEndDate + 'T23:59:59')) return false;
+      return true;
+    }
+    return true; // 'all'
+  };
 
   const filteredSales = sales.filter((s) => {
+    if (!isMatchDate(s.createdAt)) return false;
     const matchPay = filterPayment === 'All' || s.paymentMethod === filterPayment;
     if (!matchPay) return false;
     if (!search.trim()) return true;
@@ -50,32 +94,46 @@ const SalesList = () => {
     );
   });
 
+  // KPI Calculations
+  const grossSales = filteredSales.reduce((sum, s) => sum + (Number(s.grandTotal) || 0), 0);
+  const totalRefunds = filteredSales.reduce((sum, s) => sum + (Number(s.totalRefundAmount) || 0), 0);
+  const netSales = grossSales - totalRefunds;
+  const totalPaid = filteredSales.reduce((sum, s) => sum + (Number(s.paidAmount) || 0), 0);
+  const totalDue = filteredSales.reduce((sum, s) => sum + (Number(s.dueAmount) || 0), 0);
+
   const exportExcel = () => {
     const data = filteredSales.map((s, i) => ({
       'নং': i + 1,
-      'ইনভয়েস': s.invoiceNo,
+      'ইনভয়েস নং': s.invoiceNo,
       'তারিখ': formatDate(s.createdAt),
       'কাস্টমার': s.customerName || 'নগদ ক্রেতা',
       'ফোন': s.customerPhone || '',
+      'বিক্রয় টিয়ার': s.pricingTier === 'dealer' ? 'ডিলার' : s.pricingTier === 'wholesale' ? 'পাইকারি' : 'খুচরা',
       'আইটেম সংখ্যা': s.items?.length || 0,
-      'সর্বমোট দেয়': s.grandTotal || 0,
+      'সর্বমোট বিল': s.grandTotal || 0,
+      'রিটার্ন রিফান্ড': s.totalRefundAmount || 0,
+      'নিট বিল': (s.grandTotal || 0) - (s.totalRefundAmount || 0),
       'পরিশোধ': s.paidAmount || 0,
       'বাকি': s.dueAmount || 0,
       'পেমেন্ট মেথড': s.paymentMethod || 'Cash',
+      'স্ট্যাটাস': s.returnStatus === 'full' ? 'সম্পূর্ণ ফেরত' : s.returnStatus === 'partial' ? 'আংশিক ফেরত' : 'সম্পন্ন',
       'ক্যাশিয়ার': s.cashierName || ''
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sales');
-    XLSX.writeFile(wb, `Sales_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `MahinPOS_Sales_${timeFilter}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+      {/* Top Title & Excel Export */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a' }}>বিক্রয় ও ইনভয়েস হিস্ট্রি</h1>
-          <p style={{ fontSize: '14px', color: '#64748b' }}>সকল সম্পন্ন বিক্রয়ের হিসাব ও ইনভয়েস রিপ্রিন্ট</p>
+          <p style={{ fontSize: '13px', color: '#64748b' }}>
+            দৈনিক, মাসিক ও বাৎসরিক বিক্রয়ের হিসাব, ইনভয়েস রিপ্রিন্ট এবং পণ্য রিটার্ন ম্যানেজমেন্ট
+          </p>
         </div>
 
         <button
@@ -98,13 +156,103 @@ const SalesList = () => {
         </button>
       </div>
 
-      {/* Filter Bar */}
+      {/* Date Range Tabs: দৈনিক, মাসিক, বাৎসরিক, এ পর্যন্ত */}
       <div style={{
         background: '#ffffff',
-        padding: '16px',
+        padding: '8px 12px',
         borderRadius: '12px',
         border: '1px solid #e2e8f0',
-        marginBottom: '20px',
+        marginBottom: '16px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '8px'
+      }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          {[
+            { id: 'today', label: '📅 দৈনিক (আজ)' },
+            { id: 'month', label: '📆 চলতি মাস' },
+            { id: 'year', label: '📈 চলতি বছর' },
+            { id: 'all', label: '📊 এ পর্যন্ত (সর্বমোট)' },
+            { id: 'custom', label: '🗓️ কাস্টম তারিখ' }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setTimeFilter(tab.id)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                border: '1px solid',
+                borderColor: timeFilter === tab.id ? '#2563eb' : '#cbd5e1',
+                background: timeFilter === tab.id ? '#eff6ff' : '#ffffff',
+                color: timeFilter === tab.id ? '#2563eb' : '#475569',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer'
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom Date Pickers */}
+        {timeFilter === 'custom' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '12px', color: '#64748b' }}>থেকে:</span>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={(e) => setCustomStartDate(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+            />
+            <span style={{ fontSize: '12px', color: '#64748b' }}>পর্যন্ত:</span>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={(e) => setCustomEndDate(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+            />
+          </div>
+        )}
+
+        <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
+          ⚡ <span>স্পার্ক প্ল্যান অপ্টিমাইজড (সর্বশেষ {sales.length} রেকর্ড)</span>
+        </div>
+      </div>
+
+      {/* KPI Stats Bar */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+        <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+          <span style={{ fontSize: '12px', color: '#64748b', display: 'block' }}>মোট বিক্রয় (Gross Sales)</span>
+          <span style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a' }}>{formatCurrency(grossSales)}</span>
+        </div>
+        <div style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #fecaca', background: '#fff5f5' }}>
+          <span style={{ fontSize: '12px', color: '#dc2626', display: 'block', fontWeight: '700' }}>মোট রিটার্ন (Refunds)</span>
+          <span style={{ fontSize: '18px', fontWeight: '800', color: '#dc2626' }}>- {formatCurrency(totalRefunds)}</span>
+        </div>
+        <div style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #a7f3d0', background: '#f0fdf4' }}>
+          <span style={{ fontSize: '12px', color: '#059669', display: 'block', fontWeight: '700' }}>নিট বিক্রয় (Net Sales)</span>
+          <span style={{ fontSize: '18px', fontWeight: '900', color: '#059669' }}>{formatCurrency(netSales)}</span>
+        </div>
+        <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+          <span style={{ fontSize: '12px', color: '#64748b', display: 'block' }}>নগদ / পরিশোধ আদায়</span>
+          <span style={{ fontSize: '18px', fontWeight: '800', color: '#2563eb' }}>{formatCurrency(totalPaid)}</span>
+        </div>
+        <div style={{ padding: '12px 16px', borderRadius: '10px', border: '1px solid #fed7aa', background: '#fffaf5' }}>
+          <span style={{ fontSize: '12px', color: '#ea580c', display: 'block', fontWeight: '700' }}>বাকি পাওনা</span>
+          <span style={{ fontSize: '18px', fontWeight: '800', color: '#ea580c' }}>{formatCurrency(totalDue)}</span>
+        </div>
+      </div>
+
+      {/* Search & Filter Bar */}
+      <div style={{
+        background: '#ffffff',
+        padding: '12px 16px',
+        borderRadius: '12px',
+        border: '1px solid #e2e8f0',
+        marginBottom: '16px',
         display: 'flex',
         gap: '12px',
         alignItems: 'center',
@@ -116,7 +264,7 @@ const SalesList = () => {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="ইনভয়েস নং বা কাস্টমার ফোন দিয়ে খুঁজুন..."
+            placeholder="ইনভয়েস নং বা কাস্টমার ফোন বা নাম দিয়ে খুঁজুন..."
             style={{ width: '100%', padding: '9px 12px 9px 38px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '13px' }}
           />
         </div>
@@ -137,87 +285,152 @@ const SalesList = () => {
 
       {/* Sales Table */}
       <div className="table-responsive">
-        <table className="pos-table">
+        <table className="pos-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr>
+            <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
               <th>ইনভয়েস নং</th>
               <th>তারিখ ও সময়</th>
-              <th>কাস্টমার</th>
+              <th>কাস্টমার ও ধরণ</th>
               <th>আইটেম</th>
               <th>মোট বিল</th>
               <th>পরিশোধ</th>
               <th>বাকি</th>
               <th>পদ্ধতি</th>
-              <th style={{ textAlign: 'center' }}>ইনভয়েস</th>
+              <th>স্ট্যাটাস</th>
+              <th style={{ textAlign: 'center', width: '190px' }}>অ্যাকশন</th>
             </tr>
           </thead>
           <tbody>
-            {filteredSales.map((s) => (
-              <tr key={s.id}>
-                <td>
-                  <span style={{ fontWeight: '700', color: '#2563eb' }}>#{s.invoiceNo}</span>
-                </td>
-                <td>
-                  <span style={{ fontSize: '12px', color: '#64748b' }}>{formatDateTime(s.createdAt)}</span>
-                </td>
-                <td>
-                  <div style={{ fontWeight: '600' }}>{s.customerName || 'নগদ ক্রেতা'}</div>
-                  {s.customerPhone && <div style={{ fontSize: '11px', color: '#94a3b8' }}>{s.customerPhone}</div>}
-                </td>
-                <td>
-                  <span style={{ fontSize: '13px', color: '#475569' }}>{s.items?.length || 0} টি</span>
-                </td>
-                <td>
-                  <span style={{ fontWeight: '800', color: '#0f172a' }}>{formatCurrency(s.grandTotal)}</span>
-                </td>
-                <td>
-                  <span style={{ color: '#059669', fontWeight: '600' }}>{formatCurrency(s.paidAmount)}</span>
-                </td>
-                <td>
-                  {s.dueAmount > 0 ? (
-                    <span style={{ color: '#dc2626', fontWeight: '700' }}>{formatCurrency(s.dueAmount)}</span>
-                  ) : (
-                    <span style={{ color: '#94a3b8', fontSize: '12px' }}>পরিশোধিত</span>
-                  )}
-                </td>
-                <td>
-                  <span style={{
-                    padding: '2px 8px',
-                    borderRadius: '4px',
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    background: s.paymentMethod === 'Due' ? '#fee2e2' : '#eff6ff',
-                    color: s.paymentMethod === 'Due' ? '#dc2626' : '#2563eb'
-                  }}>
-                    {s.paymentMethod}
-                  </span>
-                </td>
-                <td style={{ textAlign: 'center' }}>
-                  <button
-                    onClick={() => setViewInvoice(s)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
-                      background: '#f8fafc',
-                      color: '#0f172a',
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <MdPrint size={15} /> দেখুন / প্রিন্ট
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filteredSales.map((s) => {
+              const isFullReturned = s.returnStatus === 'full';
+              const isPartialReturned = s.returnStatus === 'partial';
+
+              return (
+                <tr key={s.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  <td>
+                    <span style={{ fontWeight: '700', color: '#2563eb' }}>#{s.invoiceNo}</span>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>{formatDateTime(s.createdAt)}</span>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: '600', color: '#0f172a' }}>{s.customerName || 'নগদ ক্রেতা'}</div>
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '2px' }}>
+                      {s.customerPhone && <span style={{ fontSize: '11px', color: '#94a3b8' }}>📱 {s.customerPhone}</span>}
+                      {s.pricingTier && s.pricingTier !== 'retail' && (
+                        <span style={{
+                          fontSize: '10px',
+                          padding: '1px 5px',
+                          borderRadius: '4px',
+                          fontWeight: '800',
+                          background: s.pricingTier === 'dealer' ? '#f5f3ff' : '#ecfdf5',
+                          color: s.pricingTier === 'dealer' ? '#7c3aed' : '#059669'
+                        }}>
+                          {s.pricingTier === 'dealer' ? 'ডিলার' : 'পাইকারি'}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: '13px', color: '#475569' }}>{s.items?.length || 0} টি</span>
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: '800', color: '#0f172a' }}>{formatCurrency(s.grandTotal)}</div>
+                    {s.totalRefundAmount > 0 && (
+                      <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: '700' }}>
+                        - ফেরত: {formatCurrency(s.totalRefundAmount)}
+                      </div>
+                    )}
+                  </td>
+                  <td>
+                    <span style={{ color: '#059669', fontWeight: '600' }}>{formatCurrency(s.paidAmount)}</span>
+                  </td>
+                  <td>
+                    {s.dueAmount > 0 ? (
+                      <span style={{ color: '#dc2626', fontWeight: '700' }}>{formatCurrency(s.dueAmount)}</span>
+                    ) : (
+                      <span style={{ color: '#94a3b8', fontSize: '12px' }}>পরিশোধিত</span>
+                    )}
+                  </td>
+                  <td>
+                    <span style={{
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      background: s.paymentMethod === 'Due' ? '#fee2e2' : '#eff6ff',
+                      color: s.paymentMethod === 'Due' ? '#dc2626' : '#2563eb'
+                    }}>
+                      {s.paymentMethod}
+                    </span>
+                  </td>
+                  <td>
+                    {isFullReturned ? (
+                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800', background: '#fee2e2', color: '#dc2626' }}>
+                        সম্পূর্ণ ফেরত
+                      </span>
+                    ) : isPartialReturned ? (
+                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800', background: '#fef3c7', color: '#b45309' }}>
+                        আংশিক ফেরত
+                      </span>
+                    ) : (
+                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '700', background: '#ecfdf5', color: '#059669' }}>
+                        সম্পন্ন
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                      <button
+                        onClick={() => setViewInvoice(s)}
+                        title="ইনভয়েস দেখুন বা প্রিন্ট করুন"
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #cbd5e1',
+                          background: '#f8fafc',
+                          color: '#0f172a',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
+                        }}
+                      >
+                        <MdPrint size={14} /> প্রিন্ট
+                      </button>
+
+                      {!isFullReturned && (
+                        <button
+                          onClick={() => setReturnInvoice(s)}
+                          title="পণ্য ফেরত ও রিফান্ড দিন"
+                          style={{
+                            padding: '5px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #fecaca',
+                            background: '#fef2f2',
+                            color: '#dc2626',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <MdAssignmentReturn size={14} /> রিটার্ন
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
 
             {filteredSales.length === 0 && (
               <tr>
-                <td colSpan="9" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                <td colSpan="10" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
                   কোনো বিক্রয়ের তথ্য পাওয়া যায়নি
                 </td>
               </tr>
@@ -232,7 +445,17 @@ const SalesList = () => {
           invoice={viewInvoice}
           shopConfig={shopConfig}
           onClose={() => setViewInvoice(null)}
-          initialFormat={shopConfig?.defaultInvoiceFormat || 'pos'}
+          initialFormat={viewInvoice.defaultInvoiceFormat || (viewInvoice.pricingTier !== 'retail' ? 'a4' : 'pos')}
+        />
+      )}
+
+      {/* Product Return & Refund Modal */}
+      {returnInvoice && (
+        <ProductReturnModal
+          shopId={shopId}
+          invoice={returnInvoice}
+          userProfile={userProfile}
+          onClose={() => setReturnInvoice(null)}
         />
       )}
     </div>
