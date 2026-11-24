@@ -40,6 +40,7 @@ const AccountsDashboard = () => {
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [stockLogs, setStockLogs] = useState([]);
+  const [products, setProducts] = useState([]);
   const [archivedSummaries, setArchivedSummaries] = useState([]);
   const [timeRange, setTimeRange] = useState('today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
   const [customStartDate, setCustomStartDate] = useState('');
@@ -47,6 +48,7 @@ const AccountsDashboard = () => {
 
   // Active ledger tab: 'expenses' | 'purchases' | 'cogs'
   const [activeLedgerTab, setActiveLedgerTab] = useState('expenses');
+  const [purchaseViewMode, setPurchaseViewMode] = useState('all'); // 'all' (সকল ইনভেন্টরি ও ক্রয়) | 'period' (ফিল্টার অনুযায়ী)
   const [expenseSearch, setExpenseSearch] = useState('');
   const [purchaseSearch, setPurchaseSearch] = useState('');
 
@@ -93,10 +95,21 @@ const AccountsDashboard = () => {
       console.warn("Stock logs listener warning:", err);
     });
 
+    // Realtime Products (for initial stock & excel uploaded products)
+    const prodsQuery = query(collection(db, 'shops', shopId, 'products'), limit(300));
+    const unsubProds = onSnapshot(prodsQuery, (snap) => {
+      const list = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setProducts(list);
+    }, (err) => {
+      console.warn("Products listener warning:", err);
+    });
+
     return () => {
       unsubSales();
       unsubExp();
       unsubStock();
+      unsubProds();
     };
   }, [shopId]);
 
@@ -181,8 +194,45 @@ const AccountsDashboard = () => {
     return acc;
   }, {});
 
-  // Total Purchase Batch Cost in this period
-  const totalPurchaseCost = filteredStockLogs.reduce((sum, l) => {
+  // Merge stock_logs and products (for products added via Excel or initial stock without explicit log)
+  const productLogIds = new Set(stockLogs.map((l) => l.productId));
+  const synthesizedInitialLogs = products
+    .filter((p) => !productLogIds.has(p.id) && (Number(p.stock) > 0 || Number(p.costPrice) > 0))
+    .map((p) => {
+      const qty = Number(p.stock) || 0;
+      const cost = Number(p.costPrice) || 0;
+      return {
+        id: `init_${p.id}`,
+        productId: p.id,
+        productName: p.name || 'অজানা পণ্য',
+        productBarcode: p.barcode || p.sku || '',
+        previousStock: 0,
+        addedQuantity: qty,
+        finalStock: qty,
+        unit: p.unit || 'টি',
+        previousCostPrice: 0,
+        purchaseCostPrice: cost,
+        newAverageCostPrice: cost,
+        batchTotalCost: qty * cost,
+        supplierName: p.supplierName || 'এক্সেল আপলোড / প্রাথমিক মজুদ',
+        voucherNo: p.sku || (p.barcode ? 'BAR-' + p.barcode.slice(-6) : 'EXCEL-IMPORT'),
+        notes: 'ইনভেন্টরিতে প্রারম্ভিক মজুদ / এক্সেল আপলোড',
+        type: 'initial_stock',
+        createdAt: p.createdAt || p.updatedAt || new Date()
+      };
+    });
+
+  const allPurchases = [...stockLogs, ...synthesizedInitialLogs].sort((a, b) => {
+    const da = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+    const db = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+    return db - da;
+  });
+
+  const periodStockPurchases = allPurchases.filter((l) => isMatchPeriod(l.createdAt));
+  const displayedStockPurchases = purchaseViewMode === 'period' ? periodStockPurchases : allPurchases;
+
+  // Total Purchase Batch Cost in the active view
+  const totalPurchaseCost = displayedStockPurchases.reduce((sum, l) => {
     return sum + (Number(l.batchTotalCost) || (Number(l.addedQuantity || 0) * Number(l.purchaseCostPrice || 0)));
   }, 0);
 
@@ -258,7 +308,7 @@ const AccountsDashboard = () => {
   });
 
   // Filtered Purchase Log Rows Search
-  const searchedPurchases = filteredStockLogs.filter((l) => {
+  const searchedPurchases = displayedStockPurchases.filter((l) => {
     if (!purchaseSearch.trim()) return true;
     const q = purchaseSearch.toLowerCase();
     return (
@@ -570,7 +620,7 @@ const AccountsDashboard = () => {
                 gap: '6px'
               }}
             >
-              <MdInventory size={16} /> পণ্য ক্রয় ও রিস্টক হিস্ট্রি ({filteredStockLogs.length})
+              <MdInventory size={16} /> পণ্য ক্রয় ও রিস্টক হিস্ট্রি ({allPurchases.length})
             </button>
             <button
               onClick={() => setActiveLedgerTab('cogs')}
@@ -730,31 +780,75 @@ const AccountsDashboard = () => {
         ------------------------------------------------------------------------- */}
         {activeLedgerTab === 'purchases' && (
           <div>
-            {/* Purchase Summary Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ position: 'relative', width: '320px' }}>
-                <MdSearch size={18} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
-                <input
-                  type="text"
-                  value={purchaseSearch}
-                  onChange={(e) => setPurchaseSearch(e.target.value)}
-                  placeholder="পণ্য, সাপ্লায়ার বা ভাউচার দিয়ে খুঁজুন..."
-                  style={{ width: '100%', padding: '8px 10px 8px 34px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
-                />
+            {/* Purchase Summary Header & Sub-filters */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', width: '280px' }}>
+                  <MdSearch size={18} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
+                  <input
+                    type="text"
+                    value={purchaseSearch}
+                    onChange={(e) => setPurchaseSearch(e.target.value)}
+                    placeholder="পণ্য, সাপ্লায়ার বা ভাউচার দিয়ে খুঁজুন..."
+                    style={{ width: '100%', padding: '8px 10px 8px 34px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  />
+                </div>
+
+                {/* Sub-filter View Mode Toggles */}
+                <div style={{ display: 'flex', background: '#f1f5f9', padding: '3px', borderRadius: '8px', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setPurchaseViewMode('all')}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: purchaseViewMode === 'all' ? '#2563eb' : 'transparent',
+                      color: purchaseViewMode === 'all' ? '#ffffff' : '#475569',
+                      fontWeight: '700',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    📦 সকল ইনভেন্টরি ও ক্রয় ({allPurchases.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPurchaseViewMode('period')}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: purchaseViewMode === 'period' ? '#2563eb' : 'transparent',
+                      color: purchaseViewMode === 'period' ? '#ffffff' : '#475569',
+                      fontWeight: '700',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    🗓️ ফিল্টারকৃত তারিখের ক্রয় ({periodStockPurchases.length})
+                  </button>
+                </div>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '13px', fontWeight: '700', color: '#2563eb' }}>
-                  এই সময়ে মোট ক্রয় চালান: {formatCurrency(totalPurchaseCost)}
+                <span style={{ fontSize: '13px', fontWeight: '800', color: '#2563eb', background: '#eff6ff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                  {purchaseViewMode === 'all' ? 'সর্বমোট ইনভেন্টরি ক্রয়মূল্য' : 'এই সময়ে ক্রয় চালান'}: {formatCurrency(totalPurchaseCost)}
                 </span>
                 <Link
                   to="/dashboard/inventory"
                   style={{
                     padding: '8px 14px',
                     borderRadius: '8px',
-                    background: '#eff6ff',
-                    border: '1px solid #bfdbfe',
-                    color: '#2563eb',
+                    background: '#2563eb',
+                    border: 'none',
+                    color: '#ffffff',
                     fontSize: '12px',
                     fontWeight: '700',
                     textDecoration: 'none',
@@ -775,7 +869,7 @@ const AccountsDashboard = () => {
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                     <th style={{ padding: '10px' }}>ক্রয়ের তারিখ ও সময়</th>
                     <th style={{ padding: '10px' }}>পণ্যের নাম ও বারকোড</th>
-                    <th style={{ padding: '10px' }}>সাপ্লায়ার / মহাজন</th>
+                    <th style={{ padding: '10px' }}>সোর্স / সাপ্লায়ার</th>
                     <th style={{ padding: '10px' }}>চালান / ভাউচার</th>
                     <th style={{ padding: '10px' }}>ক্রয়ের পরিমাণ</th>
                     <th style={{ padding: '10px' }}>একক ক্রয়মূল্য</th>
@@ -793,7 +887,24 @@ const AccountsDashboard = () => {
                           {formatDateTime(l.createdAt)}
                         </td>
                         <td style={{ padding: '10px' }}>
-                          <div style={{ fontWeight: '800', color: '#0f172a' }}>{l.productName}</div>
+                          <div style={{ fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {l.productName}
+                            {l.type === 'excel_import' && (
+                              <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                                📊 এক্সেল আপলোড
+                              </span>
+                            )}
+                            {l.type === 'initial_stock' && (
+                              <span style={{ fontSize: '10px', background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                                🌱 প্রাথমিক স্টক
+                              </span>
+                            )}
+                            {l.type === 'restock' && (
+                              <span style={{ fontSize: '10px', background: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                                🔄 রিস্টক
+                              </span>
+                            )}
+                          </div>
                           {l.productBarcode && (
                             <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
                               #{l.productBarcode}
@@ -833,9 +944,29 @@ const AccountsDashboard = () => {
                   {searchedPurchases.length === 0 && (
                     <tr>
                       <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
-                        <div>📦 নির্বাচিত সময়কালে কোনো নতুন পণ্য ক্রয় বা রিস্টক রেকর্ড পাওয়া যায়নি।</div>
-                        <div style={{ fontSize: '12px', marginTop: '6px' }}>
-                          পণ্য ক্রয় লিপিবদ্ধ করতে <b>"পণ্য ও ইনভেন্টরি"</b> পেজ থেকে যে কোনো পণ্যের <b>"রিস্টক"</b> বাটনে চাপুন।
+                        <div>📦 {purchaseViewMode === 'period' ? 'নির্বাচিত সময়কালে কোনো নতুন পণ্য ক্রয় বা রিস্টক রেকর্ড পাওয়া যায়নি।' : 'কোনো পণ্য ক্রয় বা স্টক তথ্য পাওয়া যায়নি।'}</div>
+                        {purchaseViewMode === 'period' && allPurchases.length > 0 && (
+                          <div style={{ marginTop: '12px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setPurchaseViewMode('all')}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                background: '#eff6ff',
+                                border: '1px solid #2563eb',
+                                color: '#2563eb',
+                                fontWeight: '700',
+                                fontSize: '13px',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              📦 সকল ইনভেন্টরি পণ্যের ক্রয় তালিকা দেখুন ({allPurchases.length} টি পণ্য)
+                            </button>
+                          </div>
+                        )}
+                        <div style={{ fontSize: '12px', marginTop: '8px' }}>
+                          পণ্য ক্রয় লিপিবদ্ধ করতে <b>"পণ্য ও ইনভেন্টরি"</b> পেজ থেকে যে কোনো পণ্যের <b>"রিস্টক"</b> বাটনে চাপুন অথবা নতুন পণ্য যোগ/এক্সেল আপলোড করুন।
                         </div>
                       </td>
                     </tr>

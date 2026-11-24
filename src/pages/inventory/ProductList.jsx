@@ -268,11 +268,41 @@ const ProductList = () => {
               minStockAlert: minStockAlert || existing.minStockAlert || 5,
               updatedAt: serverTimestamp()
             }, { merge: true });
+
+            // Record stock log if stock increased or re-imported
+            const prevStock = Number(existing.stock) || 0;
+            const newStockVal = stock !== 0 ? stock : prevStock;
+            if (newStockVal > prevStock) {
+              const addedQty = newStockVal - prevStock;
+              const unitCost = costPrice > 0 ? costPrice : (existing.costPrice || 0);
+              await addDoc(collection(db, 'shops', shopId, 'stock_logs'), {
+                type: 'excel_import',
+                productId: existing.id,
+                productName: name,
+                productBarcode: barcode || existing.barcode || '',
+                previousStock: prevStock,
+                addedQuantity: addedQty,
+                finalStock: newStockVal,
+                unit: unit || existing.unit || 'টি (Pcs)',
+                previousCostPrice: existing.costPrice || 0,
+                purchaseCostPrice: unitCost,
+                newAverageCostPrice: unitCost,
+                batchTotalCost: addedQty * unitCost,
+                retailPrice: sellingPrice > 0 ? sellingPrice : (existing.sellingPrice || 0),
+                wholesalePrice: wholesalePrice > 0 ? wholesalePrice : (existing.wholesalePrice || 0),
+                dealerPrice: dealerPrice > 0 ? dealerPrice : (existing.dealerPrice || 0),
+                supplierName: 'এক্সেল শিট আপডেট',
+                voucherNo: 'EXCEL-UPD',
+                notes: 'এক্সেল ফাইল আপলোডের মাধ্যমে পণ্য স্টক আপডেট',
+                createdAt: serverTimestamp()
+              });
+            }
+
             updatedCount++;
           } else {
             // INSERT new product
             const finalBarcode = barcode || generateRandomBarcode();
-            await addDoc(collection(db, 'shops', shopId, 'products'), {
+            const newProdRef = await addDoc(collection(db, 'shops', shopId, 'products'), {
               name,
               nameBn,
               barcode: finalBarcode,
@@ -291,6 +321,32 @@ const ProductList = () => {
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
             });
+
+            // Write stock purchase log for new product if stock or costPrice exists
+            if (stock > 0 || costPrice > 0) {
+              await addDoc(collection(db, 'shops', shopId, 'stock_logs'), {
+                type: 'excel_import',
+                productId: newProdRef.id,
+                productName: name,
+                productBarcode: finalBarcode,
+                previousStock: 0,
+                addedQuantity: stock,
+                finalStock: stock,
+                unit: unit || 'টি (Pcs)',
+                previousCostPrice: 0,
+                purchaseCostPrice: costPrice,
+                newAverageCostPrice: costPrice,
+                batchTotalCost: stock * costPrice,
+                retailPrice: sellingPrice,
+                wholesalePrice: wholesalePrice,
+                dealerPrice: dealerPrice,
+                supplierName: 'এক্সেল শিট আপলোড',
+                voucherNo: 'EXCEL-' + (finalBarcode ? finalBarcode.slice(-6) : Date.now().toString().slice(-6)),
+                notes: 'এক্সেল ফাইল বাল্ক আপলোডের মাধ্যমে পণ্য প্রারম্ভিক স্টক এন্ট্রি',
+                createdAt: serverTimestamp()
+              });
+            }
+
             insertedCount++;
           }
         }

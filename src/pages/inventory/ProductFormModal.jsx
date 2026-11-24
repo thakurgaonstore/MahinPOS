@@ -108,7 +108,35 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
       } else {
         productData.createdAt = serverTimestamp();
         productData.totalSold = 0;
-        await addDoc(collection(db, 'shops', shopId, 'products'), productData);
+        const newDocRef = await addDoc(collection(db, 'shops', shopId, 'products'), productData);
+
+        // Record stock log for newly created product if initial stock > 0
+        if (Number(stock) > 0 || Number(costPrice) > 0) {
+          const initQty = Number(stock) || 0;
+          const initCost = Number(costPrice) || 0;
+          await addDoc(collection(db, 'shops', shopId, 'stock_logs'), {
+            type: 'initial_stock',
+            productId: newDocRef.id,
+            productName: name.trim(),
+            productBarcode: finalBarcode,
+            previousStock: 0,
+            addedQuantity: initQty,
+            finalStock: initQty,
+            unit: unit.trim() || 'টি (Pcs)',
+            previousCostPrice: 0,
+            purchaseCostPrice: initCost,
+            newAverageCostPrice: initCost,
+            batchTotalCost: initQty * initCost,
+            retailPrice: Number(sellingPrice) || 0,
+            wholesalePrice: Number(wholesalePrice) || 0,
+            dealerPrice: Number(dealerPrice) || 0,
+            supplierName: 'প্রাথমিক ইনভেন্টরি এন্ট্রি',
+            voucherNo: 'INIT-' + finalBarcode.slice(-6),
+            notes: 'নতুন পণ্য তৈরির সময় প্রারম্ভিক স্টক রেকর্ড',
+            createdAt: serverTimestamp()
+          });
+        }
+
         toast.success('নতুন পণ্য সফলভাবে তৈরি হয়েছে!');
       }
 
