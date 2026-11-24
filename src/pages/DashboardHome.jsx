@@ -10,6 +10,7 @@ import {
   MdPointOfSale,
   MdShoppingCart,
   MdTrendingUp,
+  MdTrendingDown,
   MdWarning,
   MdPeople,
   MdReceipt,
@@ -21,7 +22,11 @@ import {
   MdMilitaryTech,
   MdStars,
   MdCalendarToday,
-  MdAccountBalance
+  MdAccountBalance,
+  MdStore,
+  MdFlashOn,
+  MdArrowForward,
+  MdCheckCircle
 } from 'react-icons/md';
 
 const DashboardHome = () => {
@@ -97,11 +102,24 @@ const DashboardHome = () => {
     };
   }, [shopId, isSalesStaff]);
 
-  // Current Date Benchmarks
+  // Current Date Benchmarks & Formatting
   const now = new Date();
   const todayStr = now.toDateString();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
+
+  const bnDays = ['রবিবার', 'সোমবার', 'মঙ্গলবার', 'বুধবার', 'বৃহস্পতিবার', 'শুক্রবার', 'শনিবার'];
+  const bnMonths = ['জানুয়ারি', 'ফেব্রুয়ারি', 'মার্চ', 'এপ্রিল', 'মে', 'জুন', 'জুলাই', 'আগস্ট', 'সেপ্টেম্বর', 'অক্টোবর', 'নভেম্বর', 'ডিসেম্বর'];
+  const toBnNum = (n) => String(n).replace(/[0-9]/g, (d) => '০১২৩৪৫৬৭৮৯'[d]);
+
+  const dayBn = bnDays[now.getDay()];
+  const dateBn = toBnNum(now.getDate());
+  const monthBn = bnMonths[now.getMonth()];
+  const yearBn = toBnNum(now.getFullYear());
+  const todayDateBn = `${dayBn}, ${dateBn} ${monthBn} ${yearBn}`;
+  const todayDateEn = now.toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  const shopDisplayName = shopConfig?.shopName || userProfile?.shopName || 'Mahin Shop';
 
   const isToday = (d) => {
     if (!d) return false;
@@ -136,6 +154,10 @@ const DashboardHome = () => {
     });
   });
   const todayGrossProfit = todayRevenue - todayCOGS;
+
+  // Today Expenses (Owner/Manager only)
+  const todayExpenses = expenses.filter((e) => isToday(e.createdAt || e.date));
+  const todayExpenseAmount = todayExpenses.reduce((a, b) => a + (Number(b.amount) || 0), 0);
 
   const lowStockCount = products.filter((p) => {
     const stock = Number(p.stock) || 0;
@@ -193,52 +215,114 @@ const DashboardHome = () => {
 
   return (
     <div>
-      {/* Welcome Banner */}
+      {/* Welcome Hero Banner */}
       <div style={{
         background: isSalesStaff 
           ? 'linear-gradient(135deg, #1e1b4b 0%, #312e81 100%)' 
-          : 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+          : 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #1e3a8a 100%)',
         color: '#ffffff',
         padding: '24px 28px',
-        borderRadius: '16px',
-        marginBottom: '24px',
+        borderRadius: '18px',
+        marginBottom: '16px',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
         flexWrap: 'wrap',
-        gap: '16px',
-        boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'
+        gap: '18px',
+        boxShadow: '0 10px 25px -5px rgba(15, 23, 42, 0.25)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: '800', margin: 0 }}>
-              স্বাগতম, {userProfile?.name || userProfile?.email || 'Admin'} 👋
-            </h1>
-            <span style={{
-              background: isSalesStaff ? '#4338ca' : '#334155',
-              padding: '2px 10px',
-              borderRadius: '20px',
-              fontSize: '11px',
-              fontWeight: '700',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px'
-            }}>
-              {role === 'manager' ? 'ম্যানেজার' :
-               role === 'salesman' ? 'সেলসম্যান' :
-               role === 'cashier' ? 'ক্যাশিয়ার' :
-               role === 'accountant' ? 'হিসাবরক্ষক' : 'অ্যাডমিন'}
-            </span>
+        {/* Subtle decorative glow */}
+        <div style={{
+          position: 'absolute',
+          top: '-40px',
+          right: '-40px',
+          width: '200px',
+          height: '200px',
+          borderRadius: '50%',
+          background: 'radial-gradient(circle, rgba(59,130,246,0.25) 0%, rgba(255,255,255,0) 70%)',
+          pointerEvents: 'none'
+        }} />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', zIndex: 1, flexWrap: 'wrap' }}>
+          {/* Shop Avatar / Store Icon */}
+          <div style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '14px',
+            background: shopConfig?.logoUrl ? '#ffffff' : 'rgba(255, 255, 255, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            border: '2px solid rgba(255,255,255,0.2)',
+            overflow: 'hidden',
+            flexShrink: 0
+          }}>
+            {shopConfig?.logoUrl ? (
+              <img src={shopConfig.logoUrl} alt={shopDisplayName} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+            ) : (
+              <MdStore size={32} color="#60a5fa" />
+            )}
           </div>
-          <p style={{ fontSize: '13px', color: '#cbd5e1', margin: 0 }}>
-            {shopConfig?.shopName || 'Mahin POS Store'} — {isSalesStaff ? 'আপনার আজকের বিক্রয় ও অর্জিত ইনসেন্টিভ ড্যাশবোর্ড' : 'আজকের সামগ্রিক দোকান কার্যক্রম ও আর্থিক সংক্ষিপ্ত রিপোর্ট'}
-          </p>
+
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '6px' }}>
+              <h1 style={{ fontSize: '24px', fontWeight: '800', margin: 0, letterSpacing: '-0.5px' }}>
+                স্বাগতম, {isSalesStaff ? (userProfile?.name || loggedInStaff?.name || shopDisplayName) : shopDisplayName} 👋
+              </h1>
+              <span style={{
+                background: isSalesStaff ? '#4338ca' : '#2563eb',
+                color: '#ffffff',
+                padding: '3px 12px',
+                borderRadius: '20px',
+                fontSize: '11px',
+                fontWeight: '700',
+                letterSpacing: '0.5px',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.2)'
+              }}>
+                {role === 'manager' ? '👔 ম্যানেজার' :
+                 role === 'salesman' ? '⚡ সেলসম্যান' :
+                 role === 'cashier' ? '💳 ক্যাশিয়ার' :
+                 role === 'accountant' ? '📊 হিসাবরক্ষক' : '👑 দোকান পরিচালক'}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              {/* Date Badge */}
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(255, 255, 255, 0.12)',
+                padding: '4px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#f8fafc',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                backdropFilter: 'blur(4px)'
+              }}>
+                <MdCalendarToday size={14} color="#38bdf8" />
+                <span>{todayDateBn}</span>
+                <span style={{ opacity: 0.75, fontSize: '11px' }}>({todayDateEn})</span>
+              </div>
+
+              <span style={{ fontSize: '12px', color: '#cbd5e1' }}>
+                {isSalesStaff ? 'আপনার দৈনিক বিক্রয় ও ইনসেন্টিভ হিসাব' : 'আজকের সামগ্রিক দোকান কার্যক্রম ও আর্থিক সংক্ষিপ্ত রিপোর্ট'}
+              </span>
+            </div>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        {/* Quick action buttons */}
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', zIndex: 1 }}>
           <Link
             to="/dashboard/pos"
             style={{
-              background: '#2563eb',
+              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
               color: '#ffffff',
               padding: '10px 20px',
               borderRadius: '10px',
@@ -247,8 +331,9 @@ const DashboardHome = () => {
               fontSize: '14px',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.4)'
+              gap: '8px',
+              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
+              transition: 'all 0.2s'
             }}
           >
             <MdPointOfSale size={20} />
@@ -257,7 +342,7 @@ const DashboardHome = () => {
           <Link
             to="/dashboard/inventory"
             style={{
-              background: 'rgba(255,255,255,0.12)',
+              background: 'rgba(255, 255, 255, 0.12)',
               color: '#ffffff',
               padding: '10px 18px',
               borderRadius: '10px',
@@ -266,12 +351,162 @@ const DashboardHome = () => {
               fontSize: '14px',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px'
+              gap: '6px',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              transition: 'all 0.2s'
             }}
           >
             <MdInventory2 size={18} />
             পণ্য স্টক দেখুন
           </Link>
+        </div>
+      </div>
+
+      {/* Daily Quick Shortcuts Strip */}
+      <div style={{
+        background: '#ffffff',
+        borderRadius: '12px',
+        border: '1px solid #e2e8f0',
+        padding: '10px 16px',
+        marginBottom: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        overflowX: 'auto',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          fontSize: '12px',
+          fontWeight: '800',
+          color: '#475569',
+          whiteSpace: 'nowrap',
+          paddingRight: '6px',
+          borderRight: '1px solid #e2e8f0'
+        }}>
+          <MdFlashOn size={16} color="#2563eb" />
+          <span>দ্রুত শর্টকাট:</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <Link
+            to="/dashboard/pos"
+            style={{
+              padding: '5px 12px',
+              borderRadius: '6px',
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              fontSize: '12px',
+              fontWeight: '700',
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+              border: '1px solid #bfdbfe'
+            }}
+          >
+            ⚡ POS কাউন্টার
+          </Link>
+          <Link
+            to="/dashboard/inventory"
+            style={{
+              padding: '5px 12px',
+              borderRadius: '6px',
+              background: '#f8fafc',
+              color: '#334155',
+              fontSize: '12px',
+              fontWeight: '600',
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+              border: '1px solid #e2e8f0'
+            }}
+          >
+            📦 পণ্য ও ইনভেন্টরি
+          </Link>
+          <Link
+            to="/dashboard/sales"
+            style={{
+              padding: '5px 12px',
+              borderRadius: '6px',
+              background: '#f8fafc',
+              color: '#334155',
+              fontSize: '12px',
+              fontWeight: '600',
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+              border: '1px solid #e2e8f0'
+            }}
+          >
+            🧾 বিক্রয় ও ইনভয়েস
+          </Link>
+          <Link
+            to="/dashboard/returns"
+            style={{
+              padding: '5px 12px',
+              borderRadius: '6px',
+              background: '#f8fafc',
+              color: '#334155',
+              fontSize: '12px',
+              fontWeight: '600',
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+              border: '1px solid #e2e8f0'
+            }}
+          >
+            🔄 পণ্য ফেরত ও রিফান্ড
+          </Link>
+          {!isSalesStaff && (
+            <>
+              <Link
+                to="/dashboard/accounts"
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  background: '#f8fafc',
+                  color: '#334155',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                📊 লাভ-ক্ষতি রিপোর্ট
+              </Link>
+              <Link
+                to="/dashboard/expenses"
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  background: '#f8fafc',
+                  color: '#334155',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                💸 খরচের খাতা
+              </Link>
+              <Link
+                to="/dashboard/staff"
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  background: '#f8fafc',
+                  color: '#334155',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  textDecoration: 'none',
+                  whiteSpace: 'nowrap',
+                  border: '1px solid #e2e8f0'
+                }}
+              >
+                👔 স্টাফ ও পেরোল
+              </Link>
+            </>
+          )}
         </div>
       </div>
 
@@ -409,54 +644,136 @@ const DashboardHome = () => {
             SECTION 2: OWNER & MANAGER FULL SHOP OVERVIEW
         ========================================================================= */
         <>
-          {/* Owner Shop KPI Stats */}
+          {/* Owner Shop KPI Stats - 6 Responsive Cards */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
             gap: '16px',
             marginBottom: '24px'
           }}>
-            <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>আজকের মোট বিক্রয়</span>
-                <div style={{ background: '#eff6ff', padding: '8px', borderRadius: '8px', color: '#2563eb' }}><MdShoppingCart size={20} /></div>
-              </div>
-              <div style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a' }}>{formatCurrency(todayRevenue)}</div>
-              <span style={{ fontSize: '12px', color: '#64748b' }}>আজ {todaySales.length} টি ইনভয়েস হয়েছে</span>
-            </div>
-
-            <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>আজকের আনুমানিক লাভ (Gross)</span>
-                <div style={{ background: '#ecfdf5', padding: '8px', borderRadius: '8px', color: '#10b981' }}><MdTrendingUp size={20} /></div>
-              </div>
-              <div style={{ fontSize: '26px', fontWeight: '900', color: '#059669' }}>{formatCurrency(todayGrossProfit)}</div>
-              <span style={{ fontSize: '12px', color: '#059669', fontWeight: '600' }}>মার্জিন সংরক্ষিত</span>
-            </div>
-
-            <Link to="/dashboard/low-stock" style={{ textDecoration: 'none' }}>
-              <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>কম স্টক এলার্ট</span>
-                  <div style={{ background: lowStockCount > 0 ? '#fef3c7' : '#f8fafc', padding: '8px', borderRadius: '8px', color: lowStockCount > 0 ? '#d97706' : '#94a3b8' }}><MdWarning size={20} /></div>
+            {/* 1. Today Sales */}
+            <Link to="/dashboard/sales" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#1e293b', fontWeight: '700' }}>আজকের মোট বিক্রয়</span>
+                  <div style={{ background: '#eff6ff', padding: '8px', borderRadius: '10px', color: '#2563eb' }}><MdShoppingCart size={20} /></div>
                 </div>
-                <div style={{ fontSize: '26px', fontWeight: '900', color: lowStockCount > 0 ? '#d97706' : '#0f172a' }}>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a' }}>{formatCurrency(todayRevenue)}</div>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>আজ {todaySales.length} টি ইনভয়েস হয়েছে</span>
+              </div>
+            </Link>
+
+            {/* 2. Today Gross Profit */}
+            <Link to="/dashboard/accounts" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#059669', fontWeight: '700' }}>আজকের আনুমানিক লাভ (Gross)</span>
+                  <div style={{ background: '#ecfdf5', padding: '8px', borderRadius: '10px', color: '#10b981' }}><MdTrendingUp size={20} /></div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: '#059669' }}>{formatCurrency(todayGrossProfit)}</div>
+                <span style={{ fontSize: '12px', color: '#10b981', fontWeight: '600' }}>মার্জিন সংরক্ষিত</span>
+              </div>
+            </Link>
+
+            {/* 3. Today Expenses */}
+            <Link to="/dashboard/expenses" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#dc2626', fontWeight: '700' }}>আজকের দোকান খরচ</span>
+                  <div style={{ background: '#fef2f2', padding: '8px', borderRadius: '10px', color: '#ef4444' }}><MdTrendingDown size={20} /></div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: '#dc2626' }}>{formatCurrency(todayExpenseAmount)}</div>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>{todayExpenses.length} টি খরচ নথিবদ্ধ</span>
+              </div>
+            </Link>
+
+            {/* 4. Low Stock Alert */}
+            <Link to="/dashboard/low-stock" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: lowStockCount > 0 ? '1px solid #fed7aa' : '1px solid #e2e8f0',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: lowStockCount > 0 ? '#ea580c' : '#64748b', fontWeight: '700' }}>কম স্টক এলার্ট</span>
+                  <div style={{ background: lowStockCount > 0 ? '#fff7ed' : '#f8fafc', padding: '8px', borderRadius: '10px', color: lowStockCount > 0 ? '#ea580c' : '#94a3b8' }}><MdWarning size={20} /></div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: lowStockCount > 0 ? '#ea580c' : '#0f172a' }}>
                   {lowStockCount} টি পণ্য
                 </div>
-                <span style={{ fontSize: '12px', color: lowStockCount > 0 ? '#d97706' : '#64748b' }}>
+                <span style={{ fontSize: '12px', color: lowStockCount > 0 ? '#ea580c' : '#64748b' }}>
                   {lowStockCount > 0 ? '⚠️ অবিলম্বে রি-অর্ডার করুন' : '✓ পর্যাপ্ত স্টক রয়েছে'}
                 </span>
               </div>
             </Link>
 
-            <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '600' }}>নিবন্ধিত কাস্টমার</span>
-                <div style={{ background: '#fdf2f8', padding: '8px', borderRadius: '8px', color: '#db2777' }}><MdPeople size={20} /></div>
+            {/* 5. Total Products */}
+            <Link to="/dashboard/inventory" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '700' }}>মোট রেজিস্টার্ড পণ্য</span>
+                  <div style={{ background: '#f5f3ff', padding: '8px', borderRadius: '10px', color: '#7c3aed' }}><MdInventory2 size={20} /></div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a' }}>{products.length} টি আইটেম</div>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>ইনভেন্টরি ক্যাটালগ পরিচালনা</span>
               </div>
-              <div style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a' }}>{customers.length} জন</div>
-              <span style={{ fontSize: '12px', color: '#64748b' }}>লয়্যালটি পয়েন্ট সক্রিয়</span>
-            </div>
+            </Link>
+
+            {/* 6. Registered Customers */}
+            <Link to="/dashboard/customers" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#64748b', fontWeight: '700' }}>নিবন্ধিত কাস্টমার</span>
+                  <div style={{ background: '#fdf2f8', padding: '8px', borderRadius: '10px', color: '#db2777' }}><MdPeople size={20} /></div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: '#0f172a' }}>{customers.length} জন</div>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>লয়্যালটি পয়েন্ট সক্রিয়</span>
+              </div>
+            </Link>
           </div>
 
           {/* Staff Sales & Incentive Performance Table for Owner */}
@@ -625,9 +942,20 @@ const DashboardHome = () => {
                   <td>{s.customerName || 'নগদ ক্রেতা'}</td>
                   <td><b>{formatCurrency(s.grandTotal)}</b></td>
                   <td>
-                    <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '700', background: '#eff6ff', color: '#2563eb' }}>
-                      {s.paymentMethod}
-                    </span>
+                    {(() => {
+                      const m = (s.paymentMethod || '').toLowerCase();
+                      const isCash = m.includes('cash') || m.includes('নগদ');
+                      const isDue = m.includes('due') || m.includes('বাকি');
+                      const isMfs = m.includes('bkash') || m.includes('nagad') || m.includes('rocket') || m.includes('mfs') || m.includes('বিকাশ') || m.includes('নগদ');
+                      const bg = isDue ? '#fef2f2' : isCash ? '#ecfdf5' : isMfs ? '#fdf2f8' : '#eff6ff';
+                      const text = isDue ? '#dc2626' : isCash ? '#059669' : isMfs ? '#db2777' : '#2563eb';
+                      const border = isDue ? '#fecaca' : isCash ? '#a7f3d0' : isMfs ? '#fbcfe8' : '#bfdbfe';
+                      return (
+                        <span style={{ padding: '3px 9px', borderRadius: '5px', fontSize: '11px', fontWeight: '700', background: bg, color: text, border: `1px solid ${border}` }}>
+                          {s.paymentMethod}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     <button
