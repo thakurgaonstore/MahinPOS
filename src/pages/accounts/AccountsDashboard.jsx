@@ -18,9 +18,11 @@ import {
   MdInventory,
   MdLocalShipping,
   MdSearch,
-  MdArrowForward
+  MdArrowForward,
+  MdDeleteSweep
 } from 'react-icons/md';
 import { getArchivedYearlySummaries } from '../../utils/dataArchiveManager';
+import DataArchiveModal from '../settings/DataArchiveModal';
 import {
   BarChart,
   Bar,
@@ -36,12 +38,15 @@ import {
 const AccountsDashboard = () => {
   const { userProfile } = useAuth();
   const shopId = userProfile?.shopId || 'main-shop';
+  const role = userProfile?.role || 'cashier';
+  const isOwner = role === 'shop_admin' || role === 'manager' || userProfile?.isImpersonating;
 
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [stockLogs, setStockLogs] = useState([]);
   const [products, setProducts] = useState([]);
   const [archivedSummaries, setArchivedSummaries] = useState([]);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [timeRange, setTimeRange] = useState('today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -330,42 +335,68 @@ const AccountsDashboard = () => {
           </p>
         </div>
 
-        {/* Period Selector Tabs: দৈনিক, মাসিক, বাৎসরিক, সর্বমোট */}
-        <div style={{
-          display: 'flex',
-          gap: '6px',
-          background: '#ffffff',
-          padding: '6px',
-          borderRadius: '10px',
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-          flexWrap: 'wrap'
-        }}>
-          {[
-            { id: 'today', label: '📅 দৈনিক (আজ)' },
-            { id: 'month', label: '📆 চলতি মাস' },
-            { id: 'year', label: '📈 চলতি বছর' },
-            { id: 'all', label: '📊 এ পর্যন্ত (সর্বমোট)' },
-            { id: 'custom', label: '🗓️ কাস্টম তারিখ' }
-          ].map((tab) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {isOwner && (
             <button
-              key={tab.id}
-              onClick={() => setTimeRange(tab.id)}
+              type="button"
+              onClick={() => setIsArchiveModalOpen(true)}
+              title="বিগত বছরগুলোর পুরাতন ইনভয়েস ব্যাকআপ নিয়ে ডিলিট ও ডাটাবেস খালি করুন"
               style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                border: 'none',
-                background: timeRange === tab.id ? '#2563eb' : 'transparent',
-                color: timeRange === tab.id ? '#ffffff' : '#475569',
-                fontSize: '12px',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1px solid #fed7aa',
+                background: '#fff7ed',
+                color: '#c2410c',
                 fontWeight: '700',
+                fontSize: '12px',
                 cursor: 'pointer',
-                transition: 'all 0.2s'
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 1px 3px rgba(194, 65, 12, 0.1)'
               }}
             >
-              {tab.label}
+              <MdDeleteSweep size={18} color="#ea580c" /> পুরাতন ইনভয়েস ডিলিট / আর্কাইভ
             </button>
-          ))}
+          )}
+
+          {/* Period Selector Tabs: দৈনিক, মাসিক, বাৎসরিক, সর্বমোট */}
+          <div style={{
+            display: 'flex',
+            gap: '6px',
+            background: '#ffffff',
+            padding: '6px',
+            borderRadius: '10px',
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+            flexWrap: 'wrap'
+          }}>
+            {[
+              { id: 'today', label: '📅 দৈনিক (আজ)' },
+              { id: 'month', label: '📆 চলতি মাস' },
+              { id: 'year', label: '📈 চলতি বছর' },
+              { id: 'all', label: '📊 এ পর্যন্ত (সর্বমোট)' },
+              { id: 'custom', label: '🗓️ কাস্টম তারিখ' }
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setTimeRange(tab.id)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: timeRange === tab.id ? '#2563eb' : 'transparent',
+                  color: timeRange === tab.id ? '#ffffff' : '#475569',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1055,9 +1086,32 @@ const AccountsDashboard = () => {
       {/* Archived Yearly Ledgers Table */}
       {archivedSummaries.length > 0 && (
         <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: '800', marginBottom: '4px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MdArchive color="#ea580c" size={20} /> বিগত বছরসমূহের স্থায়ী লেজার সামারি (Archived Yearly Ledgers)
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' }}>
+            <h3 style={{ fontSize: '15px', fontWeight: '800', margin: 0, color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MdArchive color="#ea580c" size={20} /> বিগত বছরসমূহের স্থায়ী লেজার সামারি (Archived Yearly Ledgers)
+            </h3>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setIsArchiveModalOpen(true)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid #fed7aa',
+                  background: '#fff7ed',
+                  color: '#c2410c',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <MdDeleteSweep size={16} color="#ea580c" /> নতুন বছর আর্কাইভ করুন
+              </button>
+            )}
+          </div>
           <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px 0' }}>
             ডাটাবেজ সুরক্ষিত ও গতিশীল রাখতে পুরাতন ইনভয়েস আর্কাইভ করা হলেও, বিগত বছরগুলোর বাৎসরিক চূড়ান্ত আর্থিক হিসাব চিরস্থায়ীভাবে এখানে সংরক্ষিত রয়েছে।
           </p>
@@ -1095,6 +1149,20 @@ const AccountsDashboard = () => {
             </table>
           </div>
         </div>
+      )}
+
+      {/* Archive and Purge Old Invoices Modal */}
+      {isArchiveModalOpen && (
+        <DataArchiveModal
+          shopId={shopId}
+          onClose={() => {
+            setIsArchiveModalOpen(false);
+            // Refresh archived summaries
+            getArchivedYearlySummaries(shopId).then((summaries) => {
+              setArchivedSummaries(summaries || []);
+            });
+          }}
+        />
       )}
     </div>
   );

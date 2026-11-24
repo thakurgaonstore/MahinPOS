@@ -15,9 +15,11 @@ import {
   MdCalendarToday,
   MdTrendingUp,
   MdCheckCircle,
-  MdDateRange
+  MdDateRange,
+  MdDeleteSweep
 } from 'react-icons/md';
 import * as XLSX from 'xlsx';
+import DataArchiveModal from '../settings/DataArchiveModal';
 
 const SalesList = ({ defaultTab }) => {
   const [searchParams] = useSearchParams();
@@ -26,8 +28,11 @@ const SalesList = ({ defaultTab }) => {
 
   const { userProfile } = useAuth();
   const shopId = userProfile?.shopId || 'main-shop';
+  const role = userProfile?.role || 'cashier';
+  const isOwner = role === 'shop_admin' || role === 'manager' || userProfile?.isImpersonating;
 
   const [sales, setSales] = useState([]);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [filterPayment, setFilterPayment] = useState('All');
   const [timeFilter, setTimeFilter] = useState(isReturnMode ? 'all' : 'today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
@@ -288,6 +293,30 @@ const SalesList = ({ defaultTab }) => {
           >
             <MdFileDownload size={16} /> এক্সেল ডাউনলোড
           </button>
+
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => setIsArchiveModalOpen(true)}
+              title="বিগত বছরের পুরাতন ইনভয়েস ব্যাকআপ নিয়ে ডিলিট ও ডাটাবেস খালি করুন"
+              style={{
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1px solid #fed7aa',
+                background: '#fff7ed',
+                color: '#c2410c',
+                fontWeight: '700',
+                fontSize: '12px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 1px 3px rgba(194, 65, 12, 0.1)'
+              }}
+            >
+              <MdDeleteSweep size={18} color="#ea580c" /> পুরাতন ইনভয়েস ডিলিট / আর্কাইভ
+            </button>
+          )}
         </div>
       </div>
 
@@ -666,6 +695,14 @@ const SalesList = ({ defaultTab }) => {
           invoice={returnInvoice}
           userProfile={userProfile}
           onClose={() => setReturnInvoice(null)}
+        />
+      )}
+
+      {/* Archive and Purge Old Invoices Modal */}
+      {isArchiveModalOpen && (
+        <DataArchiveModal
+          shopId={shopId}
+          onClose={() => setIsArchiveModalOpen(false)}
         />
       )}
     </div>
