@@ -218,6 +218,7 @@ const POSTerminal = () => {
           nameBn: product.nameBn || '',
           barcode: product.barcode || '',
           unit: product.unit || 'টি',
+          isLoose: Boolean(product.isLoose),
           costPrice: Number(product.costPrice) || 0,
           price: price,
           discount: 0,
@@ -232,19 +233,46 @@ const POSTerminal = () => {
   // Modify cart quantity
   const updateQuantity = (index, delta) => {
     const item = cart[index];
-    const newQty = item.quantity + delta;
+    const newQty = Math.round((item.quantity + delta) * 1000) / 1000;
     if (newQty <= 0) {
       removeFromCart(index);
       return;
     }
     if (newQty > item.stock) {
-      toast.error(`স্টকে সর্বোচ্চ ${item.stock} টি রয়েছে`);
+      toast.error(`স্টকে সর্বোচ্চ ${item.stock} ${item.unit} রয়েছে`);
       return;
     }
     const newCart = [...cart];
     newCart[index].quantity = newQty;
-    newCart[index].total = (newCart[index].price - newCart[index].discount) * newQty;
+    newCart[index].total = Math.round((newCart[index].price - newCart[index].discount) * newQty * 100) / 100;
     setCart(newCart);
+  };
+
+  // Set fractional or custom quantity (e.g. 0.25 kg)
+  const setCustomQty = (index, qty) => {
+    const val = parseFloat(qty);
+    if (isNaN(val) || val <= 0) return;
+    const item = cart[index];
+    if (val > item.stock) {
+      toast.error(`স্টকে সর্বোচ্চ ${item.stock} ${item.unit} রয়েছে`);
+      return;
+    }
+    const newCart = [...cart];
+    newCart[index].quantity = val;
+    newCart[index].total = Math.round((newCart[index].price - newCart[index].discount) * val * 100) / 100;
+    setCart(newCart);
+  };
+
+  // Set quantity by target Taka amount (e.g. 20 Tk rice at 60 Tk/kg = 0.333 kg)
+  const setQtyByAmount = (index, targetTk) => {
+    const val = parseFloat(targetTk);
+    if (isNaN(val) || val <= 0) return;
+    const item = cart[index];
+    const unitPrice = item.price - item.discount;
+    if (unitPrice <= 0) return;
+    const calculatedQty = Math.round((val / unitPrice) * 1000) / 1000;
+    setCustomQty(index, calculatedQty);
+    toast.success(`৳${val} এর জন্য ${calculatedQty} ${item.unit} নির্ধারণ করা হয়েছে`);
   };
 
   // Remove from cart
@@ -736,51 +764,114 @@ const POSTerminal = () => {
                   key={idx}
                   style={{
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
+                    flexDirection: 'column',
+                    gap: '6px',
                     padding: '10px 12px',
                     background: '#f8fafc',
                     borderRadius: '8px',
                     border: '1px solid #e2e8f0'
                   }}
                 >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>{item.name}</div>
-                    <div style={{ fontSize: '12px', color: '#64748b' }}>
-                      {formatCurrency(item.price)} x {item.quantity} {item.unit}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {item.name}
+                        {item.isLoose && (
+                          <span style={{ background: '#fef3c7', color: '#b45309', fontSize: '10px', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                            ⚖️ লুজ
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#64748b' }}>
+                        {formatCurrency(item.price)} প্রতি {item.unit}
+                      </div>
                     </div>
-                  </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <button
+                        onClick={() => updateQuantity(idx, item.isLoose ? -0.25 : -1)}
+                        style={{ background: '#fff', border: '1px solid #cbd5e1', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <MdRemove size={14} />
+                      </button>
+                      <input
+                        type="number"
+                        step="any"
+                        value={item.quantity}
+                        onChange={(e) => setCustomQty(idx, e.target.value)}
+                        style={{ width: '56px', textAlign: 'center', padding: '4px 2px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: '800' }}
+                      />
+                      <button
+                        onClick={() => updateQuantity(idx, item.isLoose ? 0.25 : 1)}
+                        style={{ background: '#fff', border: '1px solid #cbd5e1', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <MdAdd size={14} />
+                      </button>
+                    </div>
+
+                    <div style={{ textAlign: 'right', minWidth: '70px', marginLeft: '12px' }}>
+                      <span style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                        {formatCurrency(item.total)}
+                      </span>
+                    </div>
+
                     <button
-                      onClick={() => updateQuantity(idx, -1)}
-                      style={{ background: '#fff', border: '1px solid #cbd5e1', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                      onClick={() => removeFromCart(idx)}
+                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', marginLeft: '8px' }}
                     >
-                      <MdRemove size={14} />
-                    </button>
-                    <span style={{ fontSize: '13px', fontWeight: '700', minWidth: '22px', textAlign: 'center' }}>
-                      {item.quantity}
-                    </span>
-                    <button
-                      onClick={() => updateQuantity(idx, 1)}
-                      style={{ background: '#fff', border: '1px solid #cbd5e1', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                    >
-                      <MdAdd size={14} />
+                      <MdDelete size={18} />
                     </button>
                   </div>
 
-                  <div style={{ textAlign: 'right', minWidth: '70px', marginLeft: '12px' }}>
-                    <span style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
-                      {formatCurrency(item.total)}
-                    </span>
-                  </div>
-
-                  <button
-                    onClick={() => removeFromCart(idx)}
-                    style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', marginLeft: '8px' }}
-                  >
-                    <MdDelete size={18} />
-                  </button>
+                  {/* Quick Weight & Amount Buttons for Loose Items (e.g. 250gm Rice, 50Tk Oil) */}
+                  {item.isLoose && (
+                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', paddingTop: '4px', borderTop: '1px dashed #e2e8f0' }}>
+                      {[
+                        { label: '১০০ গ্রাম', val: 0.1 },
+                        { label: '২৫০ গ্রাম', val: 0.25 },
+                        { label: '৫০০ গ্রাম', val: 0.5 },
+                        { label: '১ কেজি', val: 1.0 },
+                        { label: '২ কেজি', val: 2.0 }
+                      ].map(quick => (
+                        <button
+                          key={quick.val}
+                          type="button"
+                          onClick={() => setCustomQty(idx, quick.val)}
+                          style={{
+                            fontSize: '11px',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            border: '1px solid #cbd5e1',
+                            background: Number(item.quantity) === quick.val ? '#2563eb' : '#ffffff',
+                            color: Number(item.quantity) === quick.val ? '#ffffff' : '#334155',
+                            cursor: 'pointer',
+                            fontWeight: '600'
+                          }}
+                        >
+                          {quick.label}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tk = prompt(`৳ কত টাকার ${item.name} নিতে চান?`, '20');
+                          if (tk) setQtyByAmount(idx, tk);
+                        }}
+                        style={{
+                          fontSize: '11px',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid #fde68a',
+                          background: '#fffbeb',
+                          color: '#b45309',
+                          cursor: 'pointer',
+                          fontWeight: '700'
+                        }}
+                      >
+                        ৳ টাকায় হিসেব
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

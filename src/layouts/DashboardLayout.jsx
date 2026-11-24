@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import styles from './DashboardLayout.module.css';
 import { useAuth } from '../context/AuthContext';
@@ -24,7 +24,8 @@ import {
   MdMenu,
   MdClose,
   MdFullscreen,
-  MdFullscreenExit
+  MdFullscreenExit,
+  MdAdminPanelSettings
 } from 'react-icons/md';
 
 const DashboardLayout = () => {
@@ -39,6 +40,11 @@ const DashboardLayout = () => {
 
   const shopId = userProfile?.shopId || 'main-shop';
   const role = userProfile?.role || 'cashier';
+
+  const isSuperAdminUser = 
+    userProfile?.isImpersonating || 
+    userProfile?.role === 'super_admin' || 
+    ['mahin.webservice@gmail.com', 'admin@mahinpos.com', 'admin@mahinerp.com'].includes(currentUser?.email?.toLowerCase());
 
   // Realtime low stock tracker
   useEffect(() => {
@@ -73,17 +79,26 @@ const DashboardLayout = () => {
     }
   };
 
+  const handleExitToSuperAdmin = () => {
+    stopImpersonation();
+    navigate('/super-admin');
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
-      navigate('/poserp');
+      if (isSuperAdminUser) {
+        navigate('/mahinerp');
+      } else {
+        navigate('/poserp');
+      }
     } catch (err) {
       console.error("Logout failed:", err);
     }
   };
 
   // Role based access check
-  const isOwnerOrManager = role === 'shop_admin' || role === 'manager' || userProfile?.isImpersonating;
+  const isOwnerOrManager = role === 'shop_admin' || role === 'manager' || userProfile?.isImpersonating || isSuperAdminUser;
   const isAccountant = role === 'accountant' || isOwnerOrManager;
 
   const navLinks = [
@@ -92,14 +107,14 @@ const DashboardLayout = () => {
     { name: 'বিক্রয় ও ইনভয়েস', path: '/dashboard/sales', icon: <MdShoppingCart />, show: true },
     { name: 'পণ্য ও ইনভেন্টরি', path: '/dashboard/inventory', icon: <MdInventory />, show: isOwnerOrManager },
     { name: 'কম স্টক এলার্ট', path: '/dashboard/low-stock', icon: <MdWarning />, badge: lowStockCount > 0 ? lowStockCount : null, show: true },
-    { name: 'বারকোড প্রিন্টার', path: '/dashboard/barcodes', icon: <MdQrCode />, show: isOwnerOrManager },
+    { name: 'বারকোড স্টিকার প্রিন্ট', path: '/dashboard/barcodes', icon: <MdQrCode />, show: isOwnerOrManager },
     { name: 'হিসাব ও লাভ-ক্ষতি', path: '/dashboard/accounts', icon: <MdAccountBalance />, show: isAccountant },
     { name: 'খরচের খাতা', path: '/dashboard/expenses', icon: <MdReceipt />, show: isAccountant },
     { name: 'গ্রাহক ও লয়্যালটি পয়েন্ট', path: '/dashboard/customers', icon: <MdPeople />, show: true },
     { name: 'মহাজন / সাপ্লায়ার খাতা', path: '/dashboard/suppliers', icon: <MdLocalShipping />, show: isOwnerOrManager },
     { name: 'দৈনিক ক্যাশ খাতা', path: '/dashboard/cash-register', icon: <MdPayments />, show: true },
-    { name: 'স্টাফ ও পারমিশন', path: '/dashboard/staff', icon: <MdManageAccounts />, show: role === 'shop_admin' || userProfile?.isImpersonating },
-    { name: 'দোকান সেটিংস', path: '/dashboard/settings', icon: <MdSettings />, show: role === 'shop_admin' || userProfile?.isImpersonating },
+    { name: 'স্টাফ ও পেরোল (HR)', path: '/dashboard/staff', icon: <MdManageAccounts />, show: isOwnerOrManager },
+    { name: 'দোকান সেটিংস', path: '/dashboard/settings', icon: <MdSettings />, show: isOwnerOrManager },
   ];
 
   return (
@@ -118,7 +133,7 @@ const DashboardLayout = () => {
           <Link to="/dashboard" className={styles.brand}>
             <div className={styles.brandLogo}>POS</div>
             <div className={styles.brandText}>
-              <span className={styles.brandTitle}>Mahin POS</span>
+              <span className={styles.brandTitle}>{shopName}</span>
               <span className={styles.brandSubtitle}>স্মার্ট শপ ম্যানেজমেন্ট</span>
             </div>
           </Link>
@@ -145,16 +160,66 @@ const DashboardLayout = () => {
             </NavLink>
           ))}
         </nav>
+
+        {/* Super Admin Quick Return Button in Sidebar */}
+        {isSuperAdminUser && (
+          <div style={{ padding: '14px 16px', borderTop: '1px solid #1e293b', marginTop: 'auto', background: '#090d16' }}>
+            <button
+              onClick={handleExitToSuperAdmin}
+              style={{
+                width: '100%',
+                background: 'linear-gradient(135deg, #ef4444, #dc2626)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 12px rgba(239, 68, 68, 0.4)'
+              }}
+            >
+              <MdAdminPanelSettings size={18} />
+              <span>⚡ সুপার এডমিন প্যানেল</span>
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Main Content Area */}
       <div className={styles.mainWrapper}>
         {/* Impersonation Banner if Super Admin is browsing */}
         {userProfile?.isImpersonating && (
-          <div className={styles.impersonationBanner}>
-            <span>⚡ আপনি সুপার এডমিন হিসেবে <b>{userProfile.shopName}</b> দোকানে প্রবেশ করেছেন (Impersonation Mode)</span>
-            <button onClick={stopImpersonation} className={styles.stopImpBtn}>
-              এডমিনে ফেরত যান
+          <div className={styles.impersonationBanner} style={{
+            background: 'linear-gradient(90deg, #7f1d1d, #991b1b)',
+            color: '#fff',
+            padding: '12px 20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '14px',
+            fontWeight: '600'
+          }}>
+            <span>⚡ আপনি সুপার এডমিন হিসেবে <b>"{shopName}"</b> দোকানে প্রবেশ করেছেন (Impersonation Mode)</span>
+            <button
+              onClick={handleExitToSuperAdmin}
+              className={styles.stopImpBtn}
+              style={{
+                background: '#ffffff',
+                color: '#dc2626',
+                border: 'none',
+                padding: '6px 14px',
+                borderRadius: '6px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
+            >
+              সুপার এডমিনে ফিরুন →
             </button>
           </div>
         )}
@@ -177,6 +242,29 @@ const DashboardLayout = () => {
           </div>
 
           <div className={styles.topbarRight}>
+            {/* Direct Super Admin return in Topbar */}
+            {isSuperAdminUser && (
+              <button
+                onClick={handleExitToSuperAdmin}
+                style={{
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#dc2626',
+                  padding: '7px 12px',
+                  borderRadius: '6px',
+                  fontWeight: '700',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <MdAdminPanelSettings size={17} />
+                <span>সুপার এডমিন</span>
+              </button>
+            )}
+
             <Link to="/dashboard/pos" className={styles.quickPosBtn}>
               <MdPointOfSale size={18} />
               <span>নতুন বিক্রয় (POS)</span>

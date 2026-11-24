@@ -13,6 +13,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave }) => {
   const [sku, setSku] = useState(productToEdit?.sku || '');
   const [category, setCategory] = useState(productToEdit?.category || 'General');
   const [unit, setUnit] = useState(productToEdit?.unit || 'টি (Pcs)');
+  const [isLoose, setIsLoose] = useState(productToEdit?.isLoose || false);
   const [costPrice, setCostPrice] = useState(productToEdit?.costPrice || '');
   const [sellingPrice, setSellingPrice] = useState(productToEdit?.sellingPrice || productToEdit?.price || '');
   const [wholesalePrice, setWholesalePrice] = useState(productToEdit?.wholesalePrice || '');
@@ -58,6 +59,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave }) => {
         sku: sku.trim() || finalBarcode,
         category: category.trim(),
         unit: unit.trim(),
+        isLoose: Boolean(isLoose),
         costPrice: Number(costPrice) || 0,
         sellingPrice: Number(sellingPrice) || 0,
         price: Number(sellingPrice) || 0,
@@ -287,6 +289,44 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave }) => {
                 style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none' }}
               />
             </div>
+          </div>
+
+          {/* Loose / Fractional Product Toggle */}
+          <div style={{
+            background: isLoose ? '#eff6ff' : '#f8fafc',
+            border: '1px solid',
+            borderColor: isLoose ? '#bfdbfe' : '#e2e8f0',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px'
+          }}>
+            <div>
+              <div style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>
+                ⚖️ লুজ / ওজনভিত্তিক পণ্য (Loose / Fractional Product)
+              </div>
+              <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px', lineHeight: '1.4' }}>
+                চাল, ডাল, চিনি, তেল ইত্যাদি পণ্যের জন্য সক্রিয় করুন। POS কাউন্টারে কাস্টমার ২৫০ গ্রাম (০.২৫ কেজি) বা ৫০ টাকার মতো যেকোনো পরিমাণ নিলেও স্বয়ংক্রিয় মূল্য হিসেব হবে।
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', flexShrink: 0 }}>
+              <input
+                type="checkbox"
+                checked={isLoose}
+                onChange={(e) => {
+                  setIsLoose(e.target.checked);
+                  if (e.target.checked && unit === 'টি (Pcs)') {
+                    setUnit('কেজি (Kg)');
+                  }
+                }}
+                style={{ width: '18px', height: '18px' }}
+              />
+              <span style={{ fontSize: '13px', fontWeight: '700', color: isLoose ? '#2563eb' : '#64748b' }}>
+                {isLoose ? 'লুজ পণ্য' : 'সাধারণ'}
+              </span>
+            </label>
           </div>
 
           {/* Cloudinary Image Upload */}

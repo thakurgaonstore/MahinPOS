@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, deleteDoc, doc } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import { collection, onSnapshot, deleteDoc, doc, setDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/formatters';
+import { generateRandomBarcode } from '../../utils/barcodeHelper';
 import { toast } from 'react-hot-toast';
+import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import ProductFormModal from './ProductFormModal';
 import BarcodePrintCenter from './BarcodePrintCenter';
@@ -15,9 +17,12 @@ import {
   MdDelete,
   MdQrCode,
   MdFileDownload,
+  MdFileUpload,
   MdWarning,
   MdCheckCircle,
-  MdCancel
+  MdCancel,
+  MdTableChart,
+  MdInfo
 } from 'react-icons/md';
 
 const ProductList = () => {
@@ -32,6 +37,9 @@ const ProductList = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [barcodeProduct, setBarcodeProduct] = useState(null);
+  const [importing, setImporting] = useState(false);
+
+  const fileInputRef = useRef(null);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -86,24 +94,206 @@ const ProductList = () => {
     }
   };
 
-  // Export to Excel
+  // Export to Excel (Category-wise or Full Filtered)
   const handleExportExcel = () => {
     const data = filtered.map((p, i) => ({
-      'নং': i + 1,
-      'পণ্যের নাম': p.name,
-      'বাংলা নাম': p.nameBn || '',
-      'বারকোড': p.barcode || '',
-      'ক্যাটাগরি': p.category || '',
-      'ক্রয় মূল্য': p.costPrice || 0,
-      'বিক্রয় মূল্য': p.sellingPrice || 0,
-      'বর্তমান স্টক': p.stock || 0,
-      'একক': p.unit || 'টি'
+      'নং (SL)': i + 1,
+      'বারকোড (Barcode)': p.barcode || '',
+      'পণ্যের নাম (Product Name)': p.name,
+      'বাংলা নাম (Name Bn)': p.nameBn || '',
+      'ক্যাটাগরি (Category)': p.category || 'General',
+      'ক্রয় মূল্য (Cost Price)': Number(p.costPrice) || 0,
+      'বিক্রয় মূল্য (Selling Price)': Number(p.sellingPrice) || 0,
+      'পাইকারি মূল্য (Wholesale Price)': Number(p.wholesalePrice) || 0,
+      'বর্তমান স্টক (Stock)': Number(p.stock) || 0,
+      'একক (Unit)': p.unit || 'টি (Pcs)',
+      'লুজ পণ্য কিনা (Is Loose Yes/No)': p.isLoose ? 'Yes' : 'No',
+      'কম স্টক সতর্কতা (Min Stock Alert)': Number(p.minStockAlert) || 5
     }));
+
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
+    const catName = selectedCategory === 'All' ? 'All_Products' : selectedCategory.replace(/[^a-zA-Z0-9]/g, '_');
     XLSX.utils.book_append_sheet(wb, ws, 'Products');
-    XLSX.writeFile(wb, `Products_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    toast.success('এক্সেল ফাইল ডাউনলোড হয়েছে');
+    XLSX.writeFile(wb, `MahinPOS_${catName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    toast.success(`এক্সেল ফাইল (${catName}) ডাউনলোড হয়েছে!`);
+  };
+
+  // Download Sample Excel Template with clear headers & sample rows
+  const handleDownloadTemplate = () => {
+    const sampleRows = [
+      {
+        'বারকোড (Barcode)': '8901030382891',
+        'পণ্যের নাম (Product Name)': 'Lux Soft Rose Soap 100g',
+        'বাংলা নাম (Name Bn)': 'লাক্স সাবান ১০০ গ্রাম',
+        'ক্যাটাগরি (Category)': 'টয়লেট্রিজ',
+        'ক্রয় মূল্য (Cost Price)': 52,
+        'বিক্রয় মূল্য (Selling Price)': 60,
+        'পাইকারি মূল্য (Wholesale Price)': 56,
+        'বর্তমান স্টক (Stock)': 48,
+        'একক (Unit)': 'টি (Pcs)',
+        'লুজ পণ্য কিনা (Is Loose Yes/No)': 'No',
+        'কম স্টক সতর্কতা (Min Stock Alert)': 10
+      },
+      {
+        'বারকোড (Barcode)': '8901030382892',
+        'পণ্যের নাম (Product Name)': 'Miniket Rice Premium',
+        'বাংলা নাম (Name Bn)': 'মিনিকেট চাল প্রিমিয়াম',
+        'ক্যাটাগরি (Category)': 'মুদি',
+        'ক্রয় মূল্য (Cost Price)': 68,
+        'বিক্রয় মূল্য (Selling Price)': 75,
+        'পাইকারি মূল্য (Wholesale Price)': 72,
+        'বর্তমান স্টক (Stock)': 250,
+        'একক (Unit)': 'কেজি (Kg)',
+        'লুজ পণ্য কিনা (Is Loose Yes/No)': 'Yes',
+        'কম স্টক সতর্কতা (Min Stock Alert)': 20
+      },
+      {
+        'বারকোড (Barcode)': '8901030382893',
+        'পণ্যের নাম (Product Name)': 'Soyabean Oil 1 Ltr',
+        'বাংলা নাম (Name Bn)': 'সয়াবিন তেল ১ লিটার',
+        'ক্যাটাগরি (Category)': 'মুদি',
+        'ক্রয় মূল্য (Cost Price)': 165,
+        'বিক্রয় মূল্য (Selling Price)': 180,
+        'পাইকারি মূল্য (Wholesale Price)': 175,
+        'বর্তমান স্টক (Stock)': 60,
+        'একক (Unit)': 'লিটার (Ltr)',
+        'লুজ পণ্য কিনা (Is Loose Yes/No)': 'No',
+        'কম স্টক সতর্কতা (Min Stock Alert)': 12
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(sampleRows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sample_Template');
+    XLSX.writeFile(wb, 'MahinPOS_Product_Upload_Sample.xlsx');
+    toast.success('নমুনা এক্সেল টেমপ্লেট ডাউনলোড হয়েছে!');
+  };
+
+  // Upload Excel with UPSERT (Update existing if barcode/id matches, otherwise Insert)
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImporting(true);
+    const reader = new FileReader();
+
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        const rows = XLSX.utils.sheet_to_json(ws);
+
+        if (!rows || rows.length === 0) {
+          toast.error('এক্সেল ফাইলে কোনো ডেটা পাওয়া যায়নি!');
+          setImporting(false);
+          return;
+        }
+
+        let updatedCount = 0;
+        let insertedCount = 0;
+
+        for (const row of rows) {
+          // Normalize column headers
+          const barcode = String(
+            row['বারকোড (Barcode)'] ||
+            row['বারকোড'] ||
+            row['Barcode'] ||
+            row['barcode'] ||
+            row['আইডি'] ||
+            row['ID'] ||
+            ''
+          ).trim();
+
+          const name = String(
+            row['পণ্যের নাম (Product Name)'] ||
+            row['পণ্যের নাম'] ||
+            row['Product Name'] ||
+            row['name'] ||
+            row['Name'] ||
+            ''
+          ).trim();
+
+          if (!name) continue; // Skip empty rows
+
+          const nameBn = String(row['বাংলা নাম (Name Bn)'] || row['বাংলা নাম'] || row['Name Bn'] || '').trim();
+          const category = String(row['ক্যাটাগরি (Category)'] || row['ক্যাটাগরি'] || row['Category'] || 'General').trim();
+          const costPrice = Number(row['ক্রয় মূল্য (Cost Price)'] || row['ক্রয় মূল্য'] || row['Cost Price'] || 0);
+          const sellingPrice = Number(row['বিক্রয় মূল্য (Selling Price)'] || row['বিক্রয় মূল্য'] || row['Selling Price'] || row['Price'] || 0);
+          const wholesalePrice = Number(row['পাইকারি মূল্য (Wholesale Price)'] || row['পাইকারি মূল্য'] || row['Wholesale Price'] || 0);
+          const stock = Number(row['বর্তমান স্টক (Stock)'] || row['স্টক'] || row['Stock'] || row['মজুদ'] || 0);
+          const unit = String(row['একক (Unit)'] || row['একক'] || row['Unit'] || 'টি (Pcs)').trim();
+
+          const isLooseRaw = String(row['লুজ পণ্য কিনা (Is Loose Yes/No)'] || row['লুজ পণ্য'] || row['Is Loose'] || '').toLowerCase();
+          const isLoose = isLooseRaw === 'yes' || isLooseRaw === 'true' || isLooseRaw === 'হ্যাঁ' || isLooseRaw === '1';
+
+          const minStockAlert = Number(row['কম স্টক সতর্কতা (Min Stock Alert)'] || row['কম স্টক সতর্কতা'] || row['Min Stock Alert'] || 5);
+
+          // Check if this product already exists by barcode or exact name
+          const existing = products.find(p =>
+            (barcode && p.barcode && p.barcode === barcode) ||
+            (p.name && p.name.toLowerCase() === name.toLowerCase())
+          );
+
+          if (existing) {
+            // UPDATE existing product
+            await setDoc(doc(db, 'shops', shopId, 'products', existing.id), {
+              name,
+              nameBn: nameBn || existing.nameBn || '',
+              barcode: barcode || existing.barcode || generateRandomBarcode(),
+              category: category || existing.category || 'General',
+              costPrice: costPrice > 0 ? costPrice : (existing.costPrice || 0),
+              sellingPrice: sellingPrice > 0 ? sellingPrice : (existing.sellingPrice || 0),
+              price: sellingPrice > 0 ? sellingPrice : (existing.price || 0),
+              wholesalePrice: wholesalePrice > 0 ? wholesalePrice : (existing.wholesalePrice || 0),
+              stock: stock !== 0 ? stock : (existing.stock || 0),
+              unit: unit || existing.unit || 'টি (Pcs)',
+              isLoose: isLoose !== undefined ? isLoose : (existing.isLoose || false),
+              minStockAlert: minStockAlert || existing.minStockAlert || 5,
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+            updatedCount++;
+          } else {
+            // INSERT new product
+            const finalBarcode = barcode || generateRandomBarcode();
+            await addDoc(collection(db, 'shops', shopId, 'products'), {
+              name,
+              nameBn,
+              barcode: finalBarcode,
+              sku: finalBarcode,
+              category,
+              costPrice,
+              sellingPrice,
+              price: sellingPrice,
+              wholesalePrice,
+              stock,
+              unit,
+              isLoose,
+              minStockAlert,
+              imageUrl: '',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+            insertedCount++;
+          }
+        }
+
+        toast.success(
+          `এক্সেল আপলোড সফল! ${updatedCount} টি পণ্য আপডেট এবং ${insertedCount} টি নতুন পণ্য যুক্ত হয়েছে।`,
+          { duration: 6000 }
+        );
+      } catch (err) {
+        console.error("Excel import error:", err);
+        toast.error('এক্সেল ফাইল পড়তে সমস্যা হয়েছে! সঠিক ফরম্যাট নিশ্চিত করুন।');
+      } finally {
+        setImporting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+
+    reader.readAsBinaryString(file);
   };
 
   return (
@@ -111,15 +301,40 @@ const ProductList = () => {
       {/* Top Banner & Actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '14px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a' }}>পণ্য ও ইনভেন্টরি ম্যানেজমেন্ট</h1>
-          <p style={{ fontSize: '14px', color: '#64748b' }}>মোট পণ্য: <b>{products.length}</b> টি (সক্ষমতা ১০০০+ পণ্য)</p>
+          <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: 0 }}>পণ্য ও ইনভেন্টরি ম্যানেজমেন্ট</h1>
+          <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0 0 0' }}>
+            মোট পণ্য: <b>{products.length}</b> টি | ফিল্টারকৃত: <b>{filtered.length}</b> টি (ক্যাটাগরি ও লুজ পণ্য সমর্থন)
+          </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {/* Sample Template */}
+          <button
+            onClick={handleDownloadTemplate}
+            title="নতুন পণ্য আপলোডের জন্য হেডার সহ নমুনা এক্সেল ফাইল ডাউনলোড করুন"
+            style={{
+              padding: '9px 14px',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              background: '#f8fafc',
+              color: '#334155',
+              fontWeight: '600',
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <MdTableChart size={18} color="#059669" /> নমুনা এক্সেল
+          </button>
+
+          {/* Excel Export */}
           <button
             onClick={handleExportExcel}
+            title="বর্তমান ফিল্টার বা ক্যাটাগরির সমস্ত পণ্য এক্সেলে ডাউনলোড করুন"
             style={{
-              padding: '9px 16px',
+              padding: '9px 14px',
               borderRadius: '8px',
               border: '1px solid #cbd5e1',
               background: '#ffffff',
@@ -132,9 +347,56 @@ const ProductList = () => {
               gap: '6px'
             }}
           >
-            <MdFileDownload size={18} /> এক্সেল এক্সপোর্ট
+            <MdFileDownload size={18} color="#2563eb" /> এক্সপোর্ট ({selectedCategory})
           </button>
 
+          {/* Excel Import */}
+          <label style={{
+            padding: '9px 16px',
+            borderRadius: '8px',
+            border: '1px solid #cbd5e1',
+            background: '#ffffff',
+            color: '#334155',
+            fontWeight: '600',
+            fontSize: '13px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}>
+            <MdFileUpload size={18} color="#7c3aed" />
+            <span>{importing ? 'আপলোড হচ্ছে...' : 'এক্সেল আপলোড'}</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx, .xls, .csv"
+              onChange={handleFileUpload}
+              disabled={importing}
+              style={{ display: 'none' }}
+            />
+          </label>
+
+          {/* Barcode Print Page Link */}
+          <Link
+            to="/dashboard/barcodes"
+            style={{
+              padding: '9px 14px',
+              borderRadius: '8px',
+              border: '1px solid #bfdbfe',
+              background: '#eff6ff',
+              color: '#1d4ed8',
+              fontWeight: '700',
+              fontSize: '13px',
+              textDecoration: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <MdQrCode size={18} /> বারকোড সেন্টার
+          </Link>
+
+          {/* Add Product Modal */}
           <button
             onClick={() => {
               setEditingProduct(null);
@@ -155,9 +417,28 @@ const ProductList = () => {
               boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)'
             }}
           >
-            <MdAdd size={18} /> নতুন পণ্য যোগ করুন
+            <MdAdd size={18} /> নতুন পণ্য যোগ
           </button>
         </div>
+      </div>
+
+      {/* Info Callout for Excel Upsert */}
+      <div style={{
+        background: '#f8fafc',
+        border: '1px solid #e2e8f0',
+        borderRadius: '10px',
+        padding: '10px 16px',
+        marginBottom: '16px',
+        fontSize: '12px',
+        color: '#475569',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px'
+      }}>
+        <MdInfo size={18} color="#2563eb" />
+        <span>
+          💡 <b>স্মার্ট এক্সেল আপলোড:</b> এক্সেলে যদি কোনো পণ্যের বারকোড বা নাম পূর্বে থেকেই ডেটাবেসে থাকে, তবে নতুন ডেটা দিয়ে সেটি <b>স্বয়ংক্রিয়ভাবে আপডেট</b> হবে। নতুন বারকোড পেলে সেটি নতুন পণ্য হিসেবে যুক্ত হবে।
+        </span>
       </div>
 
       {/* Filter & Search Bar */}
@@ -188,7 +469,7 @@ const ProductList = () => {
           <select
             value={selectedCategory}
             onChange={(e) => { setSelectedCategory(e.target.value); setPage(1); }}
-            style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', outline: 'none' }}
+            style={{ padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px', outline: 'none', fontWeight: '600' }}
           >
             {categories.map((c) => (
               <option key={c} value={c}>{c === 'All' ? 'সকল ক্যাটাগরি' : c}</option>
@@ -250,16 +531,16 @@ const ProductList = () => {
 
       {/* Products Table */}
       <div className="table-responsive">
-        <table className="pos-table">
+        <table className="pos-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr>
-              <th style={{ width: '60px' }}>ছবি</th>
-              <th>পণ্যের নাম</th>
+            <tr style={{ borderBottom: '2px solid #f1f5f9' }}>
+              <th style={{ width: '50px' }}>ছবি</th>
+              <th>পণ্যের নাম ও বিবরণ</th>
               <th>বারকোড</th>
               <th>ক্যাটাগরি</th>
               <th>ক্রয় মূল্য</th>
               <th>বিক্রয় মূল্য</th>
-              <th>স্টক পরিমাণ</th>
+              <th>স্টক ও ধরণ</th>
               <th>স্ট্যাটাস</th>
               <th style={{ textAlign: 'center', width: '130px' }}>অ্যাকশন</th>
             </tr>
@@ -272,7 +553,7 @@ const ProductList = () => {
               const isLow = stock <= minAlert && stock > 0;
 
               return (
-                <tr key={p.id}>
+                <tr key={p.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                   <td>
                     <div style={{ width: '40px', height: '40px', borderRadius: '6px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
                       {p.imageUrl ? (
@@ -292,16 +573,27 @@ const ProductList = () => {
                     </span>
                   </td>
                   <td>
-                    <span style={{ fontSize: '12px', color: '#475569' }}>{p.category || 'General'}</span>
+                    <span style={{ fontSize: '12px', color: '#475569', background: '#f8fafc', padding: '2px 6px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                      {p.category || 'General'}
+                    </span>
                   </td>
                   <td>
                     <span style={{ color: '#64748b' }}>{formatCurrency(p.costPrice || 0)}</span>
                   </td>
                   <td>
-                    <span style={{ fontWeight: '700', color: '#2563eb' }}>{formatCurrency(p.sellingPrice || 0)}</span>
+                    <span style={{ fontWeight: '700', color: '#2563eb' }}>{formatCurrency(p.sellingPrice || p.price || 0)}</span>
                   </td>
                   <td>
-                    <span style={{ fontWeight: '800', fontSize: '14px' }}>{stock} {p.unit || ''}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: '800', fontSize: '14px', color: '#0f172a' }}>
+                        {stock} {p.unit || ''}
+                      </span>
+                      {p.isLoose && (
+                        <span style={{ background: '#fef3c7', color: '#b45309', fontSize: '10px', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                          ⚖️ লুজ
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td>
                     <span style={{

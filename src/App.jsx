@@ -36,6 +36,7 @@ const POSTerminal = lazy(() => import('./pages/pos/POSTerminal'));
 const SalesList = lazy(() => import('./pages/invoices/SalesList'));
 const ProductList = lazy(() => import('./pages/inventory/ProductList'));
 const LowStockAlerts = lazy(() => import('./pages/inventory/LowStockAlerts'));
+const BarcodePrintCenter = lazy(() => import('./pages/inventory/BarcodePrintCenter'));
 const AccountsDashboard = lazy(() => import('./pages/accounts/AccountsDashboard'));
 const ExpenseManager = lazy(() => import('./pages/accounts/ExpenseManager'));
 const CustomerManager = lazy(() => import('./pages/customers/CustomerManager'));
@@ -116,7 +117,7 @@ function App() {
                   <Route path="sales" element={<SalesList />} />
                   <Route path="inventory" element={<ProductList />} />
                   <Route path="low-stock" element={<LowStockAlerts />} />
-                  <Route path="barcodes" element={<ProductList />} />
+                  <Route path="barcodes" element={<BarcodePrintCenter />} />
                   <Route path="accounts" element={<AccountsDashboard />} />
                   <Route path="expenses" element={<ExpenseManager />} />
                   <Route path="customers" element={<CustomerManager />} />
