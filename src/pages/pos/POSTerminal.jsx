@@ -458,6 +458,9 @@ const POSTerminal = () => {
         pointsEarned: isRetailSale ? pointsEarned : 0,
         cashierId: currentUser?.uid || '',
         cashierName: userProfile?.name || userProfile?.email || 'Admin',
+        salesmanId: userProfile?.staffId || currentUser?.uid || '',
+        salesmanName: userProfile?.name || userProfile?.email || 'Admin',
+        salesmanPhone: userProfile?.phone || '',
         createdAt: serverTimestamp()
       };
 

@@ -118,14 +118,14 @@ function App() {
                   <Route path="returns" element={<SalesList defaultTab="return" />} />
                   <Route path="inventory" element={<ProductList />} />
                   <Route path="low-stock" element={<LowStockAlerts />} />
-                  <Route path="barcodes" element={<BarcodePrintCenter />} />
-                  <Route path="accounts" element={<AccountsDashboard />} />
-                  <Route path="expenses" element={<ExpenseManager />} />
+                  <Route path="barcodes" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'manager']}><BarcodePrintCenter /></ProtectedRoute>} />
+                  <Route path="accounts" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'accountant']}><AccountsDashboard /></ProtectedRoute>} />
+                  <Route path="expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'accountant', 'manager']}><ExpenseManager /></ProtectedRoute>} />
                   <Route path="customers" element={<CustomerManager />} />
-                  <Route path="suppliers" element={<SupplierLedger />} />
+                  <Route path="suppliers" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'manager', 'accountant']}><SupplierLedger /></ProtectedRoute>} />
                   <Route path="cash-register" element={<DailyCashRegister />} />
-                  <Route path="staff" element={<StaffManager />} />
-                  <Route path="settings" element={<ShopSettings />} />
+                  <Route path="staff" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin']}><StaffManager /></ProtectedRoute>} />
+                  <Route path="settings" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin']}><ShopSettings /></ProtectedRoute>} />
                 </Route>
 
                 {/* Super Admin Dashboard */}

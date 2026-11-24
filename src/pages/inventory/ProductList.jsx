@@ -9,6 +9,7 @@ import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import ProductFormModal from './ProductFormModal';
 import ProductRestockModal from './ProductRestockModal';
+import ProductWasteModal from './ProductWasteModal';
 import BarcodePrintCenter from './BarcodePrintCenter';
 
 import {
@@ -30,6 +31,8 @@ import {
 const ProductList = () => {
   const { userProfile } = useAuth();
   const shopId = userProfile?.shopId || 'main-shop';
+  const role = userProfile?.role || 'cashier';
+  const isOwnerOrManager = role === 'shop_admin' || role === 'manager' || userProfile?.isImpersonating;
 
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState('');
@@ -39,6 +42,8 @@ const ProductList = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [restockProduct, setRestockProduct] = useState(null);
+  const [wasteProduct, setWasteProduct] = useState(null);
+  const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
   const [barcodeProduct, setBarcodeProduct] = useState(null);
   const [importing, setImporting] = useState(false);
 
@@ -360,31 +365,57 @@ const ProductList = () => {
             <MdFileDownload size={18} color="#2563eb" /> এক্সপোর্ট ({selectedCategory})
           </button>
 
-          {/* Excel Import */}
-          <label style={{
-            padding: '9px 16px',
-            borderRadius: '8px',
-            border: '1px solid #cbd5e1',
-            background: '#ffffff',
-            color: '#334155',
-            fontWeight: '600',
-            fontSize: '13px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}>
-            <MdFileUpload size={18} color="#7c3aed" />
-            <span>{importing ? 'আপলোড হচ্ছে...' : 'এক্সেল আপলোড'}</span>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx, .xls, .csv"
-              onChange={handleFileUpload}
-              disabled={importing}
-              style={{ display: 'none' }}
-            />
-          </label>
+          {/* Waste / Damaged / Internal Use Button */}
+          <button
+            onClick={() => {
+              setWasteProduct(null);
+              setIsWasteModalOpen(true);
+            }}
+            title="নষ্ট, মেয়াদোত্তীর্ণ বা স্টোরের নিজস্ব ব্যবহারের পণ্য স্টক থেকে বাদ দিন"
+            style={{
+              padding: '9px 14px',
+              borderRadius: '8px',
+              border: '1.5px solid #fecaca',
+              background: '#fff1f2',
+              color: '#be123c',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <MdWarning size={17} /> নষ্ট ও ইন্টারনাল ইউজ
+          </button>
+
+          {/* Excel Import (Owner/Manager only) */}
+          {isOwnerOrManager && (
+            <label style={{
+              padding: '9px 16px',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              background: '#ffffff',
+              color: '#334155',
+              fontWeight: '600',
+              fontSize: '13px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}>
+              <MdFileUpload size={18} color="#7c3aed" />
+              <span>{importing ? 'আপলোড হচ্ছে...' : 'এক্সেল আপলোড'}</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx, .xls, .csv"
+                onChange={handleFileUpload}
+                disabled={importing}
+                style={{ display: 'none' }}
+              />
+            </label>
+          )}
 
           {/* Barcode Print Page Link */}
           <Link
@@ -406,29 +437,31 @@ const ProductList = () => {
             <MdQrCode size={18} /> বারকোড সেন্টার
           </Link>
 
-          {/* Add Product Modal */}
-          <button
-            onClick={() => {
-              setEditingProduct(null);
-              setIsModalOpen(true);
-            }}
-            style={{
-              padding: '9px 18px',
-              borderRadius: '8px',
-              border: 'none',
-              background: '#2563eb',
-              color: '#ffffff',
-              fontWeight: '700',
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)'
-            }}
-          >
-            <MdAdd size={18} /> নতুন পণ্য যোগ
-          </button>
+          {/* Add Product Modal (Owner/Manager only) */}
+          {isOwnerOrManager && (
+            <button
+              onClick={() => {
+                setEditingProduct(null);
+                setIsModalOpen(true);
+              }}
+              style={{
+                padding: '9px 18px',
+                borderRadius: '8px',
+                border: 'none',
+                background: '#2563eb',
+                color: '#ffffff',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)'
+              }}
+            >
+              <MdAdd size={18} /> নতুন পণ্য যোগ
+            </button>
+          )}
         </div>
       </div>
 
@@ -548,11 +581,11 @@ const ProductList = () => {
               <th>পণ্যের নাম ও বিবরণ</th>
               <th>বারকোড</th>
               <th>ক্যাটাগরি</th>
-              <th>ক্রয় মূল্য (গড়)</th>
+              {isOwnerOrManager && <th>ক্রয় মূল্য (গড়)</th>}
               <th>বিক্রয় মূল্য (খুচরা | পাইকারি | ডিলার)</th>
               <th>স্টক ও ধরণ</th>
               <th>স্ট্যাটাস</th>
-              <th style={{ textAlign: 'center', width: '190px' }}>অ্যাকশন</th>
+              <th style={{ textAlign: 'center', width: '220px' }}>অ্যাকশন</th>
             </tr>
           </thead>
           <tbody>
@@ -587,9 +620,11 @@ const ProductList = () => {
                       {p.category || 'General'}
                     </span>
                   </td>
-                  <td>
-                    <span style={{ color: '#475569', fontWeight: '600' }}>{formatCurrency(p.costPrice || 0)}</span>
-                  </td>
+                  {isOwnerOrManager && (
+                    <td>
+                      <span style={{ color: '#475569', fontWeight: '600' }}>{formatCurrency(p.costPrice || 0)}</span>
+                    </td>
+                  )}
                   <td>
                     <div style={{ fontSize: '12px' }}>
                       <div style={{ fontWeight: '800', color: '#2563eb' }}>
@@ -630,16 +665,42 @@ const ProductList = () => {
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                      {isOwnerOrManager && (
+                        <button
+                          onClick={() => setRestockProduct(p)}
+                          title="পণ্য রিস্টক ও গড় ক্রয় মূল্য সমন্বয় করুন"
+                          style={{
+                            padding: '5px 8px',
+                            background: '#ecfdf5',
+                            border: '1px solid #a7f3d0',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            color: '#059669',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}
+                        >
+                          <MdAddShoppingCart size={13} /> রিস্টক
+                        </button>
+                      )}
+
+                      {/* Waste / Damaged Button */}
                       <button
-                        onClick={() => setRestockProduct(p)}
-                        title="পণ্য রিস্টক ও গড় ক্রয় মূল্য সমন্বয় করুন"
+                        onClick={() => {
+                          setWasteProduct(p);
+                          setIsWasteModalOpen(true);
+                        }}
+                        title="নষ্ট, মেয়াদোত্তীর্ণ বা অভ্যন্তরীণ ব্যবহারের স্টক বাদ দিন"
                         style={{
                           padding: '5px 8px',
-                          background: '#ecfdf5',
-                          border: '1px solid #a7f3d0',
+                          background: '#fff1f2',
+                          border: '1px solid #fecaca',
                           borderRadius: '6px',
                           cursor: 'pointer',
-                          color: '#059669',
+                          color: '#dc2626',
                           fontSize: '11px',
                           fontWeight: '700',
                           display: 'flex',
@@ -647,8 +708,9 @@ const ProductList = () => {
                           gap: '3px'
                         }}
                       >
-                        <MdAddShoppingCart size={13} /> রিস্টক
+                        <MdWarning size={13} /> ড্যামেজ/ইউজ
                       </button>
+
                       <button
                         onClick={() => setBarcodeProduct(p)}
                         title="বারকোড স্টিকার প্রিন্ট করুন"
@@ -656,23 +718,28 @@ const ProductList = () => {
                       >
                         <MdQrCode size={16} />
                       </button>
-                      <button
-                        onClick={() => {
-                          setEditingProduct(p);
-                          setIsModalOpen(true);
-                        }}
-                        title="সংশোধন"
-                        style={{ padding: '6px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}
-                      >
-                        <MdEdit size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(p.id, p.name)}
-                        title="মুছুন"
-                        style={{ padding: '6px', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer', color: '#dc2626' }}
-                      >
-                        <MdDelete size={16} />
-                      </button>
+
+                      {isOwnerOrManager && (
+                        <>
+                          <button
+                            onClick={() => {
+                              setEditingProduct(p);
+                              setIsModalOpen(true);
+                            }}
+                            title="সংশোধন"
+                            style={{ padding: '6px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', cursor: 'pointer', color: '#2563eb' }}
+                          >
+                            <MdEdit size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(p.id, p.name)}
+                            title="মুছুন"
+                            style={{ padding: '6px', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '6px', cursor: 'pointer', color: '#dc2626' }}
+                          >
+                            <MdDelete size={16} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -737,6 +804,20 @@ const ProductList = () => {
           shopId={shopId}
           product={restockProduct}
           onClose={() => setRestockProduct(null)}
+        />
+      )}
+
+      {/* Waste / Damaged / Internal Use Modal */}
+      {isWasteModalOpen && (
+        <ProductWasteModal
+          shopId={shopId}
+          product={wasteProduct}
+          allProducts={products}
+          userProfile={userProfile}
+          onClose={() => {
+            setIsWasteModalOpen(false);
+            setWasteProduct(null);
+          }}
         />
       )}
     </div>

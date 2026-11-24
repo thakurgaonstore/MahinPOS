@@ -161,11 +161,11 @@ const ShopSettings = () => {
   // Cloudinary Cloud Backup
   const handleCloudinaryBackup = async () => {
     setBackupLoading(true);
-    toast.loading('Cloudinary-তে ডেটা ব্যাকআপ নেওয়া হচ্ছে...');
+    toast.loading('ক্লাউড স্টোরেজে ডেটা ব্যাকআপ নেওয়া হচ্ছে...');
     try {
       const res = await backupShopToCloudinary(shopId, shopName);
       toast.dismiss();
-      toast.success('Cloudinary ক্লাউডে সম্পূর্ণ ব্যাকআপ সংরক্ষিত হয়েছে!');
+      toast.success('সিকিউর ক্লাউডে সম্পূর্ণ ব্যাকআপ সংরক্ষিত হয়েছে!');
       setLastBackupDate(new Date().toISOString());
       setLastBackupFileUrl(res.fileUrl);
     } catch (e) {
@@ -213,7 +213,7 @@ const ShopSettings = () => {
       <div style={{ marginBottom: '20px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a' }}>দোকান সেটিংস ও কাস্টমাইজেশন</h1>
         <p style={{ fontSize: '14px', color: '#64748b' }}>
-          দোকানের পরিচিতি, ইনভয়েস ডিজাইন, এসএমএস রাউটিং, Cloudinary স্টোরেজ ও ডেটা ব্যাকআপ
+          দোকানের পরিচিতি, ইনভয়েস ডিজাইন, এসএমএস রাউটিং, ক্লাউড স্টোরেজ ও নিরাপদ ডেটা ব্যাকআপ
         </p>
       </div>
 
@@ -394,32 +394,32 @@ const ShopSettings = () => {
           </div>
         </div>
 
-        {/* Cloudinary Preset Settings (Optional - fallback to Super Admin) */}
+        {/* Custom Cloud Storage Preset Settings (Optional) */}
         <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
           <h3 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MdCloudUpload color="#7c3aed" size={20} /> Cloudinary ইমেজ ও ফাইল স্টোরেজ সেটিংস (ঐচ্ছিক)
+            <MdCloudUpload color="#7c3aed" size={20} /> ক্লাউড ফটো ও ফাইল হোস্টিং সেটিংস (ঐচ্ছিক)
           </h3>
           <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', fontSize: '13px', color: '#5b21b6', lineHeight: '1.6' }}>
-            💡 <b>স্মার্ট ফলব্যাক সুবিধা:</b> আপনি চাইলে আপনার নিজস্ব Cloudinary একাউন্টের Cloud Name ও Upload Preset নিচে যুক্ত করতে পারেন। যদি এই অপশনগুলো ফাঁকা রাখেন, তবে সিস্টেমের সেন্ট্রাল Cloudinary স্টোরেজেই আপনার পণ্যের ছবি ও ফাইল স্বয়ংক্রিয়ভাবে সুরক্ষিত থাকবে।
+            💡 <b>স্মার্ট ক্লাউড স্টোরেজ:</b> আপনার পণ্যের ছবি ও ফাইল স্বয়ংক্রিয়ভাবে সেন্ট্রাল হাই-স্পিড ক্লাউড সিডিএন স্টোরেজে সংরক্ষিত থাকে। আপনি চাইলে নিজস্ব কাস্টম স্টোরেজ কি (Cloud Name / Preset) কনফিগার করতে পারেন, অথবা এটি ফাঁকা রাখলে সিস্টেমের অন্তর্নির্মিত ক্লাউড স্টোরেজ ব্যবহার হবে।
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                নিজস্ব Cloudinary Cloud Name (ঐচ্ছিক)
+                কাস্টম ক্লাউড স্টোরেজ আইডি (ঐচ্ছিক)
               </label>
               <input
                 type="text"
                 value={cloudinaryCloudName}
                 onChange={(e) => setCloudinaryCloudName(e.target.value)}
-                placeholder="ফাঁকা রাখলে সেন্ট্রাল ক্লাউডিনারি চলবে"
+                placeholder="ফাঁকা রাখলে ডিফল্ট ক্লাউড চলবে"
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}
               />
             </div>
 
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                Upload Preset Name (ঐচ্ছিক)
+                আপলোড প্রিসেট নেম (ঐচ্ছিক)
               </label>
               <input
                 type="text"
@@ -548,7 +548,7 @@ const ShopSettings = () => {
             <span>সর্বশেষ ব্যাকআপের তারিখ: <b>{new Date(lastBackupDate).toLocaleString('bn-BD')}</b></span>
             {lastBackupFileUrl && (
               <a href={lastBackupFileUrl} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontWeight: '700', textDecoration: 'none' }}>
-                Cloudinary ফাইল ডাউনলোড ↗
+                ক্লাউড ফাইল ডাউনলোড ↗
               </a>
             )}
           </div>
@@ -582,10 +582,10 @@ const ShopSettings = () => {
             </button>
           </div>
 
-          {/* Cloudinary Cloud Backup */}
+          {/* Cloud Storage Backup */}
           <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px', background: '#fafafa' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: '700', margin: '0 0 6px 0', color: '#0f172a' }}>২. Cloudinary ক্লাউড ব্যাকআপ</h4>
-            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 14px 0' }}>সরাসরি Cloudinary ক্লাউড স্টোরেজে স্থায়ী ব্যাকআপ সংরক্ষণ করুন।</p>
+            <h4 style={{ fontSize: '14px', fontWeight: '700', margin: '0 0 6px 0', color: '#0f172a' }}>২. অটোমেটিক ক্লাউড ব্যাকআপ</h4>
+            <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 14px 0' }}>সরাসরি সিকিউর ক্লাউড স্টোরেজে স্থায়ী ব্যাকআপ সংরক্ষণ করুন।</p>
             <button
               onClick={handleCloudinaryBackup}
               disabled={backupLoading}
@@ -605,7 +605,7 @@ const ShopSettings = () => {
                 gap: '8px'
               }}
             >
-              <MdCloudUpload size={18} /> Cloudinary ক্লাউড ব্যাকআপ
+              <MdCloudUpload size={18} /> ক্লাউড ব্যাকআপ নিন
             </button>
           </div>
 

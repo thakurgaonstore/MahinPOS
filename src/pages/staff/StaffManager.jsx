@@ -56,6 +56,9 @@ const StaffManager = () => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('cashier'); // 'manager' | 'cashier' | 'accountant' | 'salesman' | 'staff'
   const [baseSalary, setBaseSalary] = useState('');
+  const [commissionType, setCommissionType] = useState('none'); // 'none' | 'percentage' | 'fixed_per_sale'
+  const [commissionRate, setCommissionRate] = useState('');
+  const [monthlySalesTarget, setMonthlySalesTarget] = useState('');
   const [joinDate, setJoinDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [status, setStatus] = useState('Active');
   const [loading, setLoading] = useState(false);
@@ -85,6 +88,8 @@ const StaffManager = () => {
   const [bonus, setBonus] = useState('');
   const [incentive, setIncentive] = useState('');
   const [otherAllowance, setOtherAllowance] = useState('');
+  const [calculatedIncentive, setCalculatedIncentive] = useState(0);
+  const [calculatedSalesTotal, setCalculatedSalesTotal] = useState(0);
 
   // Detailed Deductions Heads
   const [advanceDeduction, setAdvanceDeduction] = useState('');
@@ -183,6 +188,9 @@ const StaffManager = () => {
         phone: phone.trim(),
         role,
         baseSalary: Number(baseSalary) || 0,
+        commissionType: commissionType || 'none',
+        commissionRate: Number(commissionRate) || 0,
+        monthlySalesTarget: Number(monthlySalesTarget) || 0,
         joinDate: joinDate || new Date().toISOString().slice(0, 10),
         status,
         updatedAt: serverTimestamp()
@@ -264,7 +272,7 @@ const StaffManager = () => {
   };
 
   // Open Salary Payment Modal
-  const openPaySalaryModal = (staff) => {
+  const openPaySalaryModal = async (staff) => {
     setPayingStaff(staff);
     const bSalary = Number(staff.baseSalary) || 0;
     // Calculate total advance taken this month
@@ -277,7 +285,6 @@ const StaffManager = () => {
     setMedical('');
     setConveyance('');
     setBonus('');
-    setIncentive('');
     setOtherAllowance('');
 
     setAdvanceDeduction(staffAdvances > 0 ? staffAdvances.toString() : '0');
@@ -287,6 +294,35 @@ const StaffManager = () => {
 
     setPayMethod('Cash');
     setPayNote(`বেতন পরিশোধ: ${selectedMonth}`);
+
+    // Auto-calculate sales incentive for this staff for selectedMonth
+    let autoInc = 0;
+    let autoSold = 0;
+    try {
+      const qSales = query(collection(db, 'shops', shopId, 'sales'), limit(150));
+      const snap = await getDocs(qSales);
+      let count = 0;
+      snap.forEach((d) => {
+        const s = d.data();
+        const dStr = s.createdAt?.toDate ? s.createdAt.toDate().toISOString().slice(0, 7) : String(s.createdAt || '').slice(0, 7);
+        if (dStr === selectedMonth && (s.salesmanId === staff.id || s.cashierId === staff.id || s.salesmanPhone === staff.phone || s.cashierName === staff.name)) {
+          autoSold += (Number(s.grandTotal) || 0) - (Number(s.totalRefundAmount) || 0);
+          count += 1;
+        }
+      });
+      setCalculatedSalesTotal(autoSold);
+      if (staff.commissionType === 'percentage' && staff.commissionRate > 0) {
+        autoInc = Math.round((autoSold * staff.commissionRate) / 100);
+      } else if (staff.commissionType === 'fixed_per_sale' && staff.commissionRate > 0) {
+        autoInc = Math.round(count * staff.commissionRate);
+      }
+      setCalculatedIncentive(autoInc);
+      setIncentive(autoInc > 0 ? autoInc.toString() : '');
+    } catch (err) {
+      console.warn("Auto incentive calculation error:", err);
+      setIncentive('');
+    }
+
     setIsPayModalOpen(true);
   };
 
@@ -452,7 +488,10 @@ const StaffManager = () => {
               setPhone('');
               setPassword('');
               setBaseSalary('');
-              setRole('cashier');
+              setRole('salesman');
+              setCommissionType('none');
+              setCommissionRate('');
+              setMonthlySalesTarget('');
               setIsStaffModalOpen(true);
             }}
             style={{
@@ -581,6 +620,7 @@ const StaffManager = () => {
                   <th style={{ padding: '10px' }}>মোবাইল (লগইন আইডি)</th>
                   <th style={{ padding: '10px' }}>পদবী / রোল</th>
                   <th style={{ padding: '10px' }}>মূল বেতন (৳)</th>
+                  <th style={{ padding: '10px' }}>ইনসেন্টিভ ও টার্গেট</th>
                   <th style={{ padding: '10px' }}>যোগদানের তারিখ</th>
                   <th style={{ padding: '10px' }}>স্ট্যাটাস</th>
                   <th style={{ padding: '10px', textAlign: 'center' }}>অ্যাকশন</th>
@@ -622,6 +662,22 @@ const StaffManager = () => {
                         {formatCurrency(s.baseSalary || 0)} /মাস
                       </span>
                     </td>
+                    <td style={{ padding: '12px 10px' }}>
+                      {s.commissionType && s.commissionType !== 'none' ? (
+                        <div>
+                          <span style={{ fontSize: '11px', fontWeight: '800', background: '#ecfdf5', color: '#059669', padding: '2px 6px', borderRadius: '4px' }}>
+                            {s.commissionType === 'percentage' ? `${s.commissionRate}% কমিশন` : `৳${s.commissionRate}/মেমো`}
+                          </span>
+                          {s.monthlySalesTarget > 0 && (
+                            <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                              টার্গেট: {formatCurrency(s.monthlySalesTarget)}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>ফিক্সড</span>
+                      )}
+                    </td>
                     <td style={{ padding: '12px 10px', color: '#64748b', fontSize: '13px' }}>
                       {s.joinDate || '---'}
                     </td>
@@ -647,6 +703,9 @@ const StaffManager = () => {
                             setPassword('');
                             setRole(s.role || 'cashier');
                             setBaseSalary(s.baseSalary?.toString() || '');
+                            setCommissionType(s.commissionType || 'none');
+                            setCommissionRate(s.commissionRate?.toString() || '');
+                            setMonthlySalesTarget(s.monthlySalesTarget?.toString() || '');
                             setJoinDate(s.joinDate || '');
                             setStatus(s.status || 'Active');
                             setIsStaffModalOpen(true);
@@ -1026,6 +1085,58 @@ const StaffManager = () => {
                 </div>
               </div>
 
+              {/* Sales Commission & Incentive Policy */}
+              <div style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                  🎯 বিক্রয় কমিশন ও ইনসেন্টিভ পলিসি (Sales Incentive)
+                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '4px', color: '#475569' }}>
+                      কমিশন পদ্ধতি
+                    </label>
+                    <select
+                      value={commissionType}
+                      onChange={(e) => setCommissionType(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '12px' }}
+                    >
+                      <option value="none">কোনো কমিশন নেই (ফিক্সড বেতন)</option>
+                      <option value="percentage">বিক্রয় মূল্যের উপর শতকরা (%)</option>
+                      <option value="fixed_per_sale">প্রতি সফল বিক্রয়ে নির্দিষ্ট টাকা (৳)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '4px', color: '#475569' }}>
+                      {commissionType === 'percentage' ? 'কমিশন হার (%)' : commissionType === 'fixed_per_sale' ? 'প্রতি মেমোতে টাকা (৳)' : 'কমিশন রেট'}
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      disabled={commissionType === 'none'}
+                      value={commissionRate}
+                      onChange={(e) => setCommissionRate(e.target.value)}
+                      placeholder={commissionType === 'percentage' ? 'যেমন: 1.5' : 'যেমন: 20'}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px', background: commissionType === 'none' ? '#f1f5f9' : '#fff' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: '10px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '4px', color: '#475569' }}>
+                    মাসিক বিক্রয় লক্ষ্যমাত্রা / সেলস টার্গেট (৳)
+                  </label>
+                  <input
+                    type="number"
+                    value={monthlySalesTarget}
+                    onChange={(e) => setMonthlySalesTarget(e.target.value)}
+                    placeholder="যেমন: 100000 (১ লক্ষ টাকা)"
+                    style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+                  />
+                  <span style={{ fontSize: '11px', color: '#64748b', marginTop: '2px', display: 'block' }}>
+                    💡 কর্মী লগইন করলে তার ড্যাশবোর্ডে আজকের বিক্রয়, চলতি মাসের বিক্রয় ও কমিশন প্রগ্রেস বার দেখতে পাবে।
+                  </span>
+                </div>
+              </div>
+
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px' }}>
                   {editingStaff ? 'নতুন পাসওয়ার্ড (পরিবর্তন না করতে চাইলে ফাঁকা রাখুন)' : 'লগইন পাসওয়ার্ড *'}
@@ -1196,6 +1307,11 @@ const StaffManager = () => {
                             placeholder="0"
                             style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
                           />
+                          {calculatedIncentive > 0 && (
+                            <span style={{ fontSize: '10px', color: '#059669', fontWeight: '700', marginTop: '2px', display: 'block' }}>
+                              💡 বিক্রয় কমিশন: {formatCurrency(calculatedIncentive)} ({formatCurrency(calculatedSalesTotal)} বিক্রয়)
+                            </span>
+                          )}
                         </div>
 
                         <div>

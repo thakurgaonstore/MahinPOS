@@ -424,7 +424,7 @@ const SalesList = ({ defaultTab }) => {
         )}
 
         <div style={{ fontSize: '11px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px' }}>
-          ⚡ <span>স্পার্ক প্ল্যান অপ্টিমাইজড (সর্বশেষ {sales.length} রেকর্ড)</span>
+          ⚡ <span>রিয়েল-টাইম সিঙ্কড ({sales.length} টি রেকর্ড লোড হয়েছে)</span>
         </div>
       </div>
 

@@ -112,24 +112,25 @@ const DashboardLayout = () => {
   };
 
   // Role based access check
-  const isOwnerOrManager = role === 'shop_admin' || role === 'manager' || userProfile?.isImpersonating || isSuperAdminUser;
-  const isAccountant = role === 'accountant' || isOwnerOrManager;
+  const isOwner = role === 'shop_admin' || userProfile?.isImpersonating || isSuperAdminUser;
+  const isManager = role === 'manager' || isOwner;
+  const isAccountant = role === 'accountant' || isOwner;
 
   const navLinks = [
     { name: 'ড্যাশবোর্ড (Overview)', path: '/dashboard', icon: <MdDashboard />, show: true },
     { name: '⚡ POS বিলিং কাউন্টার', path: '/dashboard/pos', icon: <MdPointOfSale />, show: true },
     { name: 'বিক্রয় ও ইনভয়েস', path: '/dashboard/sales', icon: <MdShoppingCart />, show: true },
     { name: '🔄 পণ্য রিটার্ন ও রিফান্ড', path: '/dashboard/returns', icon: <MdAssignmentReturn />, show: true },
-    { name: 'পণ্য ও ইনভেন্টরি', path: '/dashboard/inventory', icon: <MdInventory />, show: isOwnerOrManager },
+    { name: 'পণ্য ও ইনভেন্টরি', path: '/dashboard/inventory', icon: <MdInventory />, show: true },
     { name: 'কম স্টক এলার্ট', path: '/dashboard/low-stock', icon: <MdWarning />, badge: lowStockCount > 0 ? lowStockCount : null, show: true },
-    { name: 'বারকোড স্টিকার প্রিন্ট', path: '/dashboard/barcodes', icon: <MdQrCode />, show: isOwnerOrManager },
+    { name: 'বারকোড স্টিকার প্রিন্ট', path: '/dashboard/barcodes', icon: <MdQrCode />, show: isManager },
     { name: 'হিসাব ও লাভ-ক্ষতি', path: '/dashboard/accounts', icon: <MdAccountBalance />, show: isAccountant },
-    { name: 'খরচের খাতা', path: '/dashboard/expenses', icon: <MdReceipt />, show: isAccountant },
+    { name: 'খরচের খাতা', path: '/dashboard/expenses', icon: <MdReceipt />, show: isAccountant || isManager },
     { name: 'গ্রাহক ও লয়্যালটি পয়েন্ট', path: '/dashboard/customers', icon: <MdPeople />, show: true },
-    { name: 'মহাজন / সাপ্লায়ার খাতা', path: '/dashboard/suppliers', icon: <MdLocalShipping />, show: isOwnerOrManager },
+    { name: 'মহাজন / সাপ্লায়ার খাতা', path: '/dashboard/suppliers', icon: <MdLocalShipping />, show: isManager || isAccountant },
     { name: 'দৈনিক ক্যাশ খাতা', path: '/dashboard/cash-register', icon: <MdPayments />, show: true },
-    { name: 'স্টাফ ও পেরোল (HR)', path: '/dashboard/staff', icon: <MdManageAccounts />, show: isOwnerOrManager },
-    { name: 'দোকান সেটিংস', path: '/dashboard/settings', icon: <MdSettings />, show: isOwnerOrManager },
+    { name: 'স্টাফ ও পেরোল (HR)', path: '/dashboard/staff', icon: <MdManageAccounts />, show: isOwner },
+    { name: 'দোকান সেটিংস', path: '/dashboard/settings', icon: <MdSettings />, show: isOwner },
   ];
 
   return (

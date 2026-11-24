@@ -410,7 +410,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
           {/* Cloudinary Image Upload */}
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-              পণ্যের ছবি (Cloudinary Image)
+              পণ্যের ছবি (Product Photo)
             </label>
             <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
               <label style={{
