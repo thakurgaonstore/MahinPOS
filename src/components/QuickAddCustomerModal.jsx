@@ -8,6 +8,7 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
   const [name, setName] = useState('');
   const [phone, setPhone] = useState(initialPhone || '');
   const [address, setAddress] = useState('');
+  const [customerType, setCustomerType] = useState('retail'); // 'retail' | 'wholesale' | 'dealer'
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -23,6 +24,7 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
         name: name.trim(),
         phone: phone.trim(),
         address: address.trim(),
+        customerType: customerType || 'retail',
         rewardPoints: 0,
         totalPurchases: 0,
         dueAmount: 0,
@@ -71,6 +73,44 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
         </div>
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>
+              কাস্টমারের ধরণ (Customer Type) *
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+              {[
+                { id: 'retail', label: '🛒 খুচরা (Retail)', desc: 'পয়েন্ট সুবিধা প্রযোজ্য' },
+                { id: 'wholesale', label: '📦 পাইকারি (Wholesale)', desc: 'পয়েন্ট প্রযোজ্য নয়' },
+                { id: 'dealer', label: '🏢 ডিলার (Dealer)', desc: 'পয়েন্ট প্রযোজ্য নয়' }
+              ].map((tier) => (
+                <button
+                  key={tier.id}
+                  type="button"
+                  onClick={() => setCustomerType(tier.id)}
+                  style={{
+                    padding: '8px 4px',
+                    borderRadius: '8px',
+                    border: '1px solid',
+                    borderColor: customerType === tier.id ? '#2563eb' : '#cbd5e1',
+                    background: customerType === tier.id ? '#eff6ff' : '#ffffff',
+                    color: customerType === tier.id ? '#1e40af' : '#475569',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    textAlign: 'center'
+                  }}
+                >
+                  {tier.label}
+                </button>
+              ))}
+            </div>
+            {customerType !== 'retail' && (
+              <span style={{ fontSize: '11px', color: '#b45309', marginTop: '4px', display: 'block', fontWeight: '600' }}>
+                ⚠️ পাইকারি ও ডিলার কাস্টমারদের কোনো রিওয়ার্ড পয়েন্ট অর্জিত বা রিডিম হবে না।
+              </span>
+            )}
+          </div>
+
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '4px' }}>
               কাস্টমারের নাম *

@@ -8,6 +8,7 @@ import { toast } from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import ProductFormModal from './ProductFormModal';
+import ProductRestockModal from './ProductRestockModal';
 import BarcodePrintCenter from './BarcodePrintCenter';
 
 import {
@@ -22,7 +23,8 @@ import {
   MdCheckCircle,
   MdCancel,
   MdTableChart,
-  MdInfo
+  MdInfo,
+  MdAddShoppingCart
 } from 'react-icons/md';
 
 const ProductList = () => {
@@ -36,6 +38,7 @@ const ProductList = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [restockProduct, setRestockProduct] = useState(null);
   const [barcodeProduct, setBarcodeProduct] = useState(null);
   const [importing, setImporting] = useState(false);
 
@@ -105,6 +108,7 @@ const ProductList = () => {
       'ক্রয় মূল্য (Cost Price)': Number(p.costPrice) || 0,
       'বিক্রয় মূল্য (Selling Price)': Number(p.sellingPrice) || 0,
       'পাইকারি মূল্য (Wholesale Price)': Number(p.wholesalePrice) || 0,
+      'ডিলার মূল্য (Dealer Price)': Number(p.dealerPrice) || 0,
       'বর্তমান স্টক (Stock)': Number(p.stock) || 0,
       'একক (Unit)': p.unit || 'টি (Pcs)',
       'লুজ পণ্য কিনা (Is Loose Yes/No)': p.isLoose ? 'Yes' : 'No',
@@ -130,6 +134,7 @@ const ProductList = () => {
         'ক্রয় মূল্য (Cost Price)': 52,
         'বিক্রয় মূল্য (Selling Price)': 60,
         'পাইকারি মূল্য (Wholesale Price)': 56,
+        'ডিলার মূল্য (Dealer Price)': 54,
         'বর্তমান স্টক (Stock)': 48,
         'একক (Unit)': 'টি (Pcs)',
         'লুজ পণ্য কিনা (Is Loose Yes/No)': 'No',
@@ -143,6 +148,7 @@ const ProductList = () => {
         'ক্রয় মূল্য (Cost Price)': 68,
         'বিক্রয় মূল্য (Selling Price)': 75,
         'পাইকারি মূল্য (Wholesale Price)': 72,
+        'ডিলার মূল্য (Dealer Price)': 70,
         'বর্তমান স্টক (Stock)': 250,
         'একক (Unit)': 'কেজি (Kg)',
         'লুজ পণ্য কিনা (Is Loose Yes/No)': 'Yes',
@@ -156,6 +162,7 @@ const ProductList = () => {
         'ক্রয় মূল্য (Cost Price)': 165,
         'বিক্রয় মূল্য (Selling Price)': 180,
         'পাইকারি মূল্য (Wholesale Price)': 175,
+        'ডিলার মূল্য (Dealer Price)': 172,
         'বর্তমান স্টক (Stock)': 60,
         'একক (Unit)': 'লিটার (Ltr)',
         'লুজ পণ্য কিনা (Is Loose Yes/No)': 'No',
@@ -223,6 +230,7 @@ const ProductList = () => {
           const costPrice = Number(row['ক্রয় মূল্য (Cost Price)'] || row['ক্রয় মূল্য'] || row['Cost Price'] || 0);
           const sellingPrice = Number(row['বিক্রয় মূল্য (Selling Price)'] || row['বিক্রয় মূল্য'] || row['Selling Price'] || row['Price'] || 0);
           const wholesalePrice = Number(row['পাইকারি মূল্য (Wholesale Price)'] || row['পাইকারি মূল্য'] || row['Wholesale Price'] || 0);
+          const dealerPrice = Number(row['ডিলার মূল্য (Dealer Price)'] || row['ডিলার মূল্য'] || row['Dealer Price'] || 0);
           const stock = Number(row['বর্তমান স্টক (Stock)'] || row['স্টক'] || row['Stock'] || row['মজুদ'] || 0);
           const unit = String(row['একক (Unit)'] || row['একক'] || row['Unit'] || 'টি (Pcs)').trim();
 
@@ -248,6 +256,7 @@ const ProductList = () => {
               sellingPrice: sellingPrice > 0 ? sellingPrice : (existing.sellingPrice || 0),
               price: sellingPrice > 0 ? sellingPrice : (existing.price || 0),
               wholesalePrice: wholesalePrice > 0 ? wholesalePrice : (existing.wholesalePrice || 0),
+              dealerPrice: dealerPrice > 0 ? dealerPrice : (existing.dealerPrice || 0),
               stock: stock !== 0 ? stock : (existing.stock || 0),
               unit: unit || existing.unit || 'টি (Pcs)',
               isLoose: isLoose !== undefined ? isLoose : (existing.isLoose || false),
@@ -268,6 +277,7 @@ const ProductList = () => {
               sellingPrice,
               price: sellingPrice,
               wholesalePrice,
+              dealerPrice,
               stock,
               unit,
               isLoose,
@@ -538,11 +548,11 @@ const ProductList = () => {
               <th>পণ্যের নাম ও বিবরণ</th>
               <th>বারকোড</th>
               <th>ক্যাটাগরি</th>
-              <th>ক্রয় মূল্য</th>
-              <th>বিক্রয় মূল্য</th>
+              <th>ক্রয় মূল্য (গড়)</th>
+              <th>বিক্রয় মূল্য (খুচরা | পাইকারি | ডিলার)</th>
               <th>স্টক ও ধরণ</th>
               <th>স্ট্যাটাস</th>
-              <th style={{ textAlign: 'center', width: '130px' }}>অ্যাকশন</th>
+              <th style={{ textAlign: 'center', width: '190px' }}>অ্যাকশন</th>
             </tr>
           </thead>
           <tbody>
@@ -578,10 +588,20 @@ const ProductList = () => {
                     </span>
                   </td>
                   <td>
-                    <span style={{ color: '#64748b' }}>{formatCurrency(p.costPrice || 0)}</span>
+                    <span style={{ color: '#475569', fontWeight: '600' }}>{formatCurrency(p.costPrice || 0)}</span>
                   </td>
                   <td>
-                    <span style={{ fontWeight: '700', color: '#2563eb' }}>{formatCurrency(p.sellingPrice || p.price || 0)}</span>
+                    <div style={{ fontSize: '12px' }}>
+                      <div style={{ fontWeight: '800', color: '#2563eb' }}>
+                        খুচরা: {formatCurrency(p.sellingPrice || p.price || 0)}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#059669', fontWeight: '600' }}>
+                        পাইকারি: {formatCurrency(p.wholesalePrice || 0)}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '600' }}>
+                        ডিলার: {formatCurrency(p.dealerPrice || 0)}
+                      </div>
+                    </div>
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -609,7 +629,26 @@ const ProductList = () => {
                     </span>
                   </td>
                   <td style={{ textAlign: 'center' }}>
-                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                      <button
+                        onClick={() => setRestockProduct(p)}
+                        title="পণ্য রিস্টক ও গড় ক্রয় মূল্য সমন্বয় করুন"
+                        style={{
+                          padding: '5px 8px',
+                          background: '#ecfdf5',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          color: '#059669',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}
+                      >
+                        <MdAddShoppingCart size={13} /> রিস্টক
+                      </button>
                       <button
                         onClick={() => setBarcodeProduct(p)}
                         title="বারকোড স্টিকার প্রিন্ট করুন"
@@ -689,6 +728,15 @@ const ProductList = () => {
         <BarcodePrintCenter
           product={barcodeProduct}
           onClose={() => setBarcodeProduct(null)}
+        />
+      )}
+
+      {/* Restock & Weighted Average Cost Modal */}
+      {restockProduct && (
+        <ProductRestockModal
+          shopId={shopId}
+          product={restockProduct}
+          onClose={() => setRestockProduct(null)}
         />
       )}
     </div>

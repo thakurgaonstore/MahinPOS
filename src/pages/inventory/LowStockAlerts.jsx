@@ -4,7 +4,8 @@ import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/formatters';
 import ProductFormModal from './ProductFormModal';
-import { MdWarning, MdEdit, MdShoppingCart, MdFileDownload } from 'react-icons/md';
+import ProductRestockModal from './ProductRestockModal';
+import { MdWarning, MdEdit, MdShoppingCart, MdFileDownload, MdAddShoppingCart } from 'react-icons/md';
 import * as XLSX from 'xlsx';
 
 const LowStockAlerts = () => {
@@ -13,6 +14,7 @@ const LowStockAlerts = () => {
 
   const [lowStockProducts, setLowStockProducts] = useState([]);
   const [editingProduct, setEditingProduct] = useState(null);
+  const [restockProduct, setRestockProduct] = useState(null);
 
   useEffect(() => {
     if (!shopId) return;
@@ -127,12 +129,20 @@ const LowStockAlerts = () => {
                   </td>
                   <td>{formatCurrency(p.costPrice || 0)}</td>
                   <td style={{ textAlign: 'center' }}>
-                    <button
-                      onClick={() => setEditingProduct(p)}
-                      style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #bfdbfe', background: '#eff6ff', color: '#2563eb', fontWeight: '600', fontSize: '12px', cursor: 'pointer' }}
-                    >
-                      স্টক আপডেট
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                      <button
+                        onClick={() => setRestockProduct(p)}
+                        style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #a7f3d0', background: '#ecfdf5', color: '#059669', fontWeight: '700', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <MdAddShoppingCart size={14} /> রিস্টক করুন
+                      </button>
+                      <button
+                        onClick={() => setEditingProduct(p)}
+                        style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #bfdbfe', background: '#eff6ff', color: '#2563eb', fontWeight: '600', fontSize: '12px', cursor: 'pointer' }}
+                      >
+                        সংশোধন
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -154,6 +164,14 @@ const LowStockAlerts = () => {
           shopId={shopId}
           productToEdit={editingProduct}
           onClose={() => setEditingProduct(null)}
+        />
+      )}
+
+      {restockProduct && (
+        <ProductRestockModal
+          shopId={shopId}
+          product={restockProduct}
+          onClose={() => setRestockProduct(null)}
         />
       )}
     </div>

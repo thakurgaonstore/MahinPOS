@@ -127,6 +127,7 @@ const CustomerManager = () => {
           <thead>
             <tr>
               <th>কাস্টমারের নাম</th>
+              <th>ধরণ (Type)</th>
               <th>মোবাইল নম্বর</th>
               <th>ঠিকানা</th>
               <th>মোট ক্রয়</th>
@@ -136,40 +137,63 @@ const CustomerManager = () => {
             </tr>
           </thead>
           <tbody>
-            {filteredCustomers.map((c) => (
-              <tr key={c.id}>
-                <td>
-                  <span style={{ fontWeight: '700', color: '#0f172a' }}>{c.name}</span>
-                </td>
-                <td>
-                  <span style={{ fontSize: '13px', color: '#2563eb' }}>{c.phone}</span>
-                </td>
-                <td>{c.address || '---'}</td>
-                <td>
-                  <span style={{ fontWeight: '600' }}>{formatCurrency(c.totalPurchases || 0)}</span>
-                </td>
-                <td>
-                  <span style={{ fontWeight: '800', color: (c.dueAmount || 0) > 0 ? '#dc2626' : '#64748b' }}>
-                    {formatCurrency(c.dueAmount || 0)}
-                  </span>
-                </td>
-                <td>
-                  <span style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    background: '#eff6ff',
-                    color: '#2563eb',
-                    padding: '3px 8px',
-                    borderRadius: '12px',
-                    fontWeight: '700',
-                    fontSize: '12px'
-                  }}>
-                    <MdCardGiftcard size={14} />
-                    {c.rewardPoints || 0} pt
-                  </span>
-                </td>
-                <td style={{ textAlign: 'center' }}>
+            {filteredCustomers.map((c) => {
+              const type = c.customerType || 'retail';
+              return (
+                <tr key={c.id}>
+                  <td>
+                    <span style={{ fontWeight: '700', color: '#0f172a' }}>{c.name}</span>
+                  </td>
+                  <td>
+                    <span style={{
+                      display: 'inline-block',
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      background: type === 'dealer' ? '#f5f3ff' : type === 'wholesale' ? '#ecfdf5' : '#eff6ff',
+                      color: type === 'dealer' ? '#7c3aed' : type === 'wholesale' ? '#059669' : '#2563eb',
+                      border: '1px solid',
+                      borderColor: type === 'dealer' ? '#ddd6fe' : type === 'wholesale' ? '#a7f3d0' : '#bfdbfe'
+                    }}>
+                      {type === 'dealer' ? 'ডিলার' : type === 'wholesale' ? 'পাইকারি' : 'খুচরা'}
+                    </span>
+                  </td>
+                  <td>
+                    <span style={{ fontSize: '13px', color: '#2563eb' }}>{c.phone}</span>
+                  </td>
+                  <td>{c.address || '---'}</td>
+                  <td>
+                    <span style={{ fontWeight: '600' }}>{formatCurrency(c.totalPurchases || 0)}</span>
+                  </td>
+                  <td>
+                    <span style={{ fontWeight: '800', color: (c.dueAmount || 0) > 0 ? '#dc2626' : '#64748b' }}>
+                      {formatCurrency(c.dueAmount || 0)}
+                    </span>
+                  </td>
+                  <td>
+                    {type === 'retail' ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        background: '#eff6ff',
+                        color: '#2563eb',
+                        padding: '3px 8px',
+                        borderRadius: '12px',
+                        fontWeight: '700',
+                        fontSize: '12px'
+                      }}>
+                        <MdCardGiftcard size={14} />
+                        {c.rewardPoints || 0} pt
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic' }}>
+                        প্রযোজ্য নয়
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
                   {(c.dueAmount || 0) > 0 && (
                     <button
                       onClick={() => {
@@ -192,11 +216,12 @@ const CustomerManager = () => {
                   )}
                 </td>
               </tr>
-            ))}
+            );
+          })}
 
             {filteredCustomers.length === 0 && (
               <tr>
-                <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
+                <td colSpan="8" style={{ textAlign: 'center', padding: '30px', color: '#94a3b8' }}>
                   কোনো কাস্টমার পাওয়া যায়নি
                 </td>
               </tr>

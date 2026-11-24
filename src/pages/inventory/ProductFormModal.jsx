@@ -17,6 +17,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
   const [costPrice, setCostPrice] = useState(productToEdit?.costPrice || '');
   const [sellingPrice, setSellingPrice] = useState(productToEdit?.sellingPrice || productToEdit?.price || '');
   const [wholesalePrice, setWholesalePrice] = useState(productToEdit?.wholesalePrice || '');
+  const [dealerPrice, setDealerPrice] = useState(productToEdit?.dealerPrice || '');
   const [stock, setStock] = useState(productToEdit?.stock || '0');
   const [minStockAlert, setMinStockAlert] = useState(productToEdit?.minStockAlert || '5');
   const [imageUrl, setImageUrl] = useState(productToEdit?.imageUrl || '');
@@ -94,6 +95,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
         sellingPrice: Number(sellingPrice) || 0,
         price: Number(sellingPrice) || 0,
         wholesalePrice: Number(wholesalePrice) || 0,
+        dealerPrice: Number(dealerPrice) || 0,
         stock: Number(stock) || 0,
         minStockAlert: Number(minStockAlert) || 5,
         imageUrl: imageUrl || '',
@@ -264,7 +266,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '14px' }}>
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
                 ক্রয় মূল্য (Cost Price ৳)
@@ -280,7 +282,7 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
 
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-                বিক্রয় মূল্য (MRP ৳) *
+                ১. খুচরা মূল্য (Retail MRP ৳) *
               </label>
               <input
                 type="number"
@@ -294,12 +296,25 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
 
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-                পাইকারি মূল্য (Wholesale ৳)
+                ২. পাইকারি মূল্য (Wholesale ৳)
               </label>
               <input
                 type="number"
                 value={wholesalePrice}
                 onChange={(e) => setWholesalePrice(e.target.value)}
+                placeholder="0.00"
+                style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
+                ৩. ডিলার মূল্য (Dealer ৳)
+              </label>
+              <input
+                type="number"
+                value={dealerPrice}
+                onChange={(e) => setDealerPrice(e.target.value)}
                 placeholder="0.00"
                 style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none' }}
               />

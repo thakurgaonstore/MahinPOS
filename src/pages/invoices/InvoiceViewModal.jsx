@@ -4,8 +4,14 @@ import { QRCodeSVG } from 'qrcode.react';
 import { formatCurrency, formatDate, formatDateTime, numberToBengaliWords } from '../../utils/formatters';
 import { MdPrint, MdClose, MdReceipt, MdDescription, MdFormatListBulleted } from 'react-icons/md';
 
-const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' }) => {
-  const [format, setFormat] = React.useState(initialFormat); // 'pos' | 'memo' | 'a4'
+const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
+  const isWholesaleOrDealer = invoice?.pricingTier === 'wholesale' ||
+                              invoice?.pricingTier === 'dealer' ||
+                              invoice?.customerType === 'wholesale' ||
+                              invoice?.customerType === 'dealer';
+
+  const defaultFormat = initialFormat || (isWholesaleOrDealer ? 'a4' : 'pos');
+  const [format, setFormat] = React.useState(defaultFormat); // 'pos' | 'memo' | 'a4'
   const barcodeRef = useRef(null);
 
   useEffect(() => {
@@ -77,67 +83,149 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
           background: '#f8fafc'
         }}>
           {/* Format Selector Buttons */}
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={() => setFormat('pos')}
-              style={{
-                padding: '6px 12px',
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {isWholesaleOrDealer ? (
+              <>
+                <button
+                  onClick={() => setFormat('a4')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: format === 'a4' ? '#2563eb' : '#cbd5e1',
+                    background: format === 'a4' ? '#eff6ff' : '#ffffff',
+                    color: format === 'a4' ? '#2563eb' : '#475569',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdDescription size={16} />
+                  ১. অফিসিয়াল ইনভয়েস (A4)
+                </button>
+                <button
+                  onClick={() => setFormat('memo')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: format === 'memo' ? '#2563eb' : '#cbd5e1',
+                    background: format === 'memo' ? '#eff6ff' : '#ffffff',
+                    color: format === 'memo' ? '#2563eb' : '#475569',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdFormatListBulleted size={16} />
+                  ২. ক্যাশ মেমো (A5)
+                </button>
+                <button
+                  onClick={() => setFormat('pos')}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: format === 'pos' ? '#2563eb' : '#cbd5e1',
+                    background: format === 'pos' ? '#eff6ff' : '#ffffff',
+                    color: format === 'pos' ? '#2563eb' : '#475569',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdReceipt size={14} />
+                  ৩. থার্মাল POS (80mm)
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setFormat('pos')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: format === 'pos' ? '#2563eb' : '#cbd5e1',
+                    background: format === 'pos' ? '#eff6ff' : '#ffffff',
+                    color: format === 'pos' ? '#2563eb' : '#475569',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdReceipt size={16} />
+                  ১. থার্মাল POS (80mm)
+                </button>
+                <button
+                  onClick={() => setFormat('memo')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: format === 'memo' ? '#2563eb' : '#cbd5e1',
+                    background: format === 'memo' ? '#eff6ff' : '#ffffff',
+                    color: format === 'memo' ? '#2563eb' : '#475569',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdFormatListBulleted size={16} />
+                  ২. ক্যাশ মেমো (A5)
+                </button>
+                <button
+                  onClick={() => setFormat('a4')}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid',
+                    borderColor: format === 'a4' ? '#2563eb' : '#cbd5e1',
+                    background: format === 'a4' ? '#eff6ff' : '#ffffff',
+                    color: format === 'a4' ? '#2563eb' : '#475569',
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdDescription size={16} />
+                  ৩. অফিসিয়াল ইনভয়েস (A4)
+                </button>
+              </>
+            )}
+
+            {isWholesaleOrDealer && (
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '800',
+                padding: '4px 8px',
                 borderRadius: '6px',
+                background: invoice.pricingTier === 'dealer' ? '#f5f3ff' : '#ecfdf5',
+                color: invoice.pricingTier === 'dealer' ? '#7c3aed' : '#059669',
                 border: '1px solid',
-                borderColor: format === 'pos' ? '#2563eb' : '#cbd5e1',
-                background: format === 'pos' ? '#eff6ff' : '#ffffff',
-                color: format === 'pos' ? '#2563eb' : '#475569',
-                fontSize: '13px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}
-            >
-              <MdReceipt size={16} />
-              ১. থার্মাল POS (80mm)
-            </button>
-            <button
-              onClick={() => setFormat('memo')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                border: '1px solid',
-                borderColor: format === 'memo' ? '#2563eb' : '#cbd5e1',
-                background: format === 'memo' ? '#eff6ff' : '#ffffff',
-                color: format === 'memo' ? '#2563eb' : '#475569',
-                fontSize: '13px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}
-            >
-              <MdFormatListBulleted size={16} />
-              ২. ক্যাশ মেমো (A5)
-            </button>
-            <button
-              onClick={() => setFormat('a4')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                border: '1px solid',
-                borderColor: format === 'a4' ? '#2563eb' : '#cbd5e1',
-                background: format === 'a4' ? '#eff6ff' : '#ffffff',
-                color: format === 'a4' ? '#2563eb' : '#475569',
-                fontSize: '13px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px'
-              }}
-            >
-              <MdDescription size={16} />
-              ৩. অফিসিয়াল ইনভয়েস (A4)
-            </button>
+                borderColor: invoice.pricingTier === 'dealer' ? '#ddd6fe' : '#a7f3d0'
+              }}>
+                {invoice.pricingTier === 'dealer' ? '🏢 ডিলার ইনভয়েস' : '📦 পাইকারি মেমো'}
+              </span>
+            )}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -288,8 +376,8 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                   )}
                 </div>
 
-                {/* Rewards & Loyalty Point Balance Info */}
-                {(invoice.customerPhone || invoice.customerRewardPoints !== undefined || invoice.pointsEarned > 0 || invoice.pointsRedeemed > 0) && (
+                {/* Rewards & Loyalty Point Balance Info (Retail only) */}
+                {!isWholesaleOrDealer && (invoice.customerPhone || invoice.customerRewardPoints !== undefined || invoice.pointsEarned > 0 || invoice.pointsRedeemed > 0) && (
                   <div style={{
                     background: '#eff6ff',
                     border: '1px dashed #bfdbfe',
@@ -337,7 +425,11 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                 {/* Info Bar */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', background: '#f8fafc', padding: '10px', borderRadius: '6px', marginBottom: '14px', fontSize: '13px' }}>
                   <div>
-                    <div>মেমো নং: <b>#{invoice.invoiceNo}</b></div>
+                    <div>
+                      মেমো নং: <b>#{invoice.invoiceNo}</b>
+                      {invoice.pricingTier === 'dealer' && <span style={{ marginLeft: '6px', fontSize: '11px', background: '#ddd6fe', color: '#5b21b6', padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>ডিলার মেমো</span>}
+                      {invoice.pricingTier === 'wholesale' && <span style={{ marginLeft: '6px', fontSize: '11px', background: '#a7f3d0', color: '#065f46', padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>পাইকারি মেমো</span>}
+                    </div>
                     <div>ক্রেতার নাম: <b>{invoice.customerName || 'সাধারণ ক্রেতা'}</b></div>
                     <div>ঠিকানা: {invoice.customerAddress || '---'}</div>
                   </div>
@@ -380,7 +472,7 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                     <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '6px', fontSize: '13px' }}>
                       <b>কথায়:</b> {numberToBengaliWords(invoice.grandTotal)}
                     </div>
-                    {invoice.customerPhone && (
+                    {!isWholesaleOrDealer && invoice.customerPhone && (
                       <div style={{ marginTop: '8px', background: '#eff6ff', border: '1px dashed #bfdbfe', padding: '8px 10px', borderRadius: '6px', fontSize: '12px' }}>
                         <div style={{ fontWeight: '700', color: '#1e40af', marginBottom: '2px' }}>🎁 লয়্যালটি রিওয়ার্ড পয়েন্টস</div>
                         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', color: '#334155' }}>
@@ -456,8 +548,8 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                   </div>
 
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ display: 'inline-block', background: '#2563eb', color: '#ffffff', padding: '4px 16px', borderRadius: '4px', fontWeight: '700', fontSize: '14px', marginBottom: '8px' }}>
-                      OFFICIAL INVOICE
+                    <div style={{ display: 'inline-block', background: invoice.pricingTier === 'dealer' ? '#7c3aed' : invoice.pricingTier === 'wholesale' ? '#059669' : '#2563eb', color: '#ffffff', padding: '4px 16px', borderRadius: '4px', fontWeight: '700', fontSize: '14px', marginBottom: '8px' }}>
+                      {invoice.pricingTier === 'dealer' ? 'DEALER INVOICE (ডিলার চালান)' : invoice.pricingTier === 'wholesale' ? 'WHOLESALE INVOICE (পাইকারি চালান)' : 'OFFICIAL INVOICE'}
                     </div>
                     <div style={{ fontSize: '13px' }}>ইনভয়েস নং: <b>#{invoice.invoiceNo}</b></div>
                     <div style={{ fontSize: '13px' }}>তারিখ: <b>{formatDate(invoice.createdAt)}</b></div>
@@ -469,7 +561,11 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                 <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px', background: '#f8fafc', padding: '16px', borderRadius: '8px', marginBottom: '24px' }}>
                   <div>
                     <h4 style={{ fontSize: '12px', textTransform: 'uppercase', color: '#64748b', marginBottom: '4px' }}>ক্রেতার তথ্য (Bill To):</h4>
-                    <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#0f172a', margin: '0 0 2px' }}>{invoice.customerName || 'নগদ ক্রেতা (Walk-in Customer)'}</h3>
+                    <h3 style={{ fontSize: '16px', fontWeight: '700', color: '#0f172a', margin: '0 0 2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {invoice.customerName || 'নগদ ক্রেতা (Walk-in Customer)'}
+                      {invoice.pricingTier === 'dealer' && <span style={{ fontSize: '12px', background: '#ddd6fe', color: '#5b21b6', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' }}>ডিলার</span>}
+                      {invoice.pricingTier === 'wholesale' && <span style={{ fontSize: '12px', background: '#a7f3d0', color: '#065f46', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' }}>পাইকারি</span>}
+                    </h3>
                     <p style={{ fontSize: '13px', margin: '0 0 2px' }}>মোবাইল: {invoice.customerPhone || 'N/A'}</p>
                     <p style={{ fontSize: '13px', margin: '0' }}>ঠিকানা: {invoice.customerAddress || 'N/A'}</p>
                   </div>
@@ -514,7 +610,7 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                   <div>
                     <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '14px', fontSize: '13px' }}>
                       <p style={{ margin: '0 0 6px' }}><b>টাকার পরিমাণ (কথায়):</b> {numberToBengaliWords(invoice.grandTotal)}</p>
-                      {invoice.customerPhone && (
+                      {!isWholesaleOrDealer && invoice.customerPhone && (
                         <div style={{ marginTop: '8px', background: '#ffffff', border: '1px dashed #93c5fd', padding: '8px 10px', borderRadius: '6px', fontSize: '12px' }}>
                           <div style={{ fontWeight: '700', color: '#1e40af', marginBottom: '2px' }}>🎁 লয়্যালটি রিওয়ার্ড পয়েন্টস (Loyalty Points)</div>
                           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', color: '#334155' }}>

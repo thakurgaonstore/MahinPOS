@@ -52,6 +52,7 @@ const POSTerminal = () => {
 
   // Cart state
   const [cart, setCart] = useState([]);
+  const [pricingTier, setPricingTier] = useState('retail'); // 'retail' | 'wholesale' | 'dealer'
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
@@ -201,6 +202,39 @@ const POSTerminal = () => {
     return phoneMatch || nameMatch;
   });
 
+  // Helper to get unit selling price based on tier (Retail, Wholesale, Dealer)
+  const getTierPrice = (product, tier = pricingTier) => {
+    if (tier === 'dealer') {
+      const dp = Number(product.dealerPrice) || 0;
+      if (dp > 0) return dp;
+      const wp = Number(product.wholesalePrice) || 0;
+      if (wp > 0) return wp;
+    } else if (tier === 'wholesale') {
+      const wp = Number(product.wholesalePrice) || 0;
+      if (wp > 0) return wp;
+    }
+    return Number(product.sellingPrice) || Number(product.price) || 0;
+  };
+
+  // Switch Pricing Tier and dynamically recalculate existing cart
+  const handleSwitchTier = (newTier) => {
+    setPricingTier(newTier);
+    if (newTier !== 'retail') {
+      setPointsToRedeem(0);
+    }
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        const newUnitPrice = getTierPrice(item, newTier);
+        const lineTotal = Math.round((newUnitPrice - item.discount) * item.quantity * 100) / 100;
+        return {
+          ...item,
+          price: newUnitPrice,
+          total: lineTotal
+        };
+      })
+    );
+  };
+
   // Add to cart
   const addToCart = (product) => {
     const existingIndex = cart.findIndex((item) => item.productId === product.id);
@@ -214,14 +248,14 @@ const POSTerminal = () => {
       }
       const newCart = [...cart];
       newCart[existingIndex].quantity += 1;
-      newCart[existingIndex].total = (newCart[existingIndex].price - newCart[existingIndex].discount) * newCart[existingIndex].quantity;
+      newCart[existingIndex].total = Math.round((newCart[existingIndex].price - newCart[existingIndex].discount) * newCart[existingIndex].quantity * 100) / 100;
       setCart(newCart);
     } else {
       if (currentStock <= 0) {
         toast.error('দুঃখিত! এই পণ্যটির স্টক শেষ (Out of Stock)');
         return;
       }
-      const price = Number(product.sellingPrice) || Number(product.price) || 0;
+      const price = getTierPrice(product, pricingTier);
       setCart([
         ...cart,
         {
@@ -232,6 +266,9 @@ const POSTerminal = () => {
           unit: product.unit || 'টি',
           isLoose: Boolean(product.isLoose),
           costPrice: Number(product.costPrice) || 0,
+          sellingPrice: Number(product.sellingPrice) || Number(product.price) || 0,
+          wholesalePrice: Number(product.wholesalePrice) || 0,
+          dealerPrice: Number(product.dealerPrice) || 0,
           price: price,
           discount: 0,
           quantity: 1,
@@ -304,17 +341,20 @@ const POSTerminal = () => {
     calculatedDiscount = Number(discountVal) || 0;
   }
 
-  // Loyalty Points conversion (1 point = 1 BDT discount)
-  const pointsDiscount = Number(pointsToRedeem) || 0;
+  // Retail vs Wholesale/Dealer Loyalty Check
+  const isRetailSale = pricingTier === 'retail' && (!selectedCustomer || (selectedCustomer.customerType || 'retail') === 'retail');
+
+  // Loyalty Points conversion (1 point = 1 BDT discount) - Strictly for Retail only
+  const pointsDiscount = isRetailSale ? (Number(pointsToRedeem) || 0) : 0;
   const totalDiscount = Math.min(subtotal, calculatedDiscount + pointsDiscount);
 
   const discountedSubtotal = Math.max(0, subtotal - totalDiscount);
   const taxAmount = (discountedSubtotal * (Number(taxPercent) || 0)) / 100;
   const grandTotal = Math.round(discountedSubtotal + taxAmount);
 
-  // Reward points earned on current transaction (1 point per 100 BDT spent)
+  // Reward points earned on current transaction (1 point per 100 BDT spent) - Retail only
   const pointsEarnRate = shopConfig?.pointsEarnRate || 100; // default 100 BDT = 1 point
-  const pointsEarned = Math.floor(grandTotal / pointsEarnRate);
+  const pointsEarned = isRetailSale ? Math.floor(grandTotal / pointsEarnRate) : 0;
 
   // Return change calculation
   const numericPaid = Number(paidAmount) || 0;
@@ -339,6 +379,7 @@ const POSTerminal = () => {
       time: new Date().toLocaleTimeString(),
       cart,
       customer: selectedCustomer,
+      pricingTier,
       grandTotal
     };
     const updated = [holdItem, ...heldCarts];
@@ -354,6 +395,9 @@ const POSTerminal = () => {
   const handleResumeCart = (holdItem) => {
     setCart(holdItem.cart);
     setSelectedCustomer(holdItem.customer || null);
+    if (holdItem.pricingTier) {
+      setPricingTier(holdItem.pricingTier);
+    }
     const updated = heldCarts.filter((h) => h.id !== holdItem.id);
     setHeldCarts(updated);
     localStorage.setItem(`heldCarts_${shopId}`, JSON.stringify(updated));
@@ -379,8 +423,10 @@ const POSTerminal = () => {
       const actualPaid = paymentMethod === 'Due' ? 0 : numericPaid;
       const actualDue = paymentMethod === 'Due' ? grandTotal : dueAmount;
 
-      const customerPrevPoints = selectedCustomer ? (Number(selectedCustomer.rewardPoints) || 0) : 0;
-      const finalCustomerPoints = selectedCustomer ? Math.max(0, customerPrevPoints + pointsEarned - pointsToRedeem) : 0;
+      const customerPrevPoints = (isRetailSale && selectedCustomer) ? (Number(selectedCustomer.rewardPoints) || 0) : 0;
+      const finalCustomerPoints = (isRetailSale && selectedCustomer)
+        ? Math.max(0, customerPrevPoints + pointsEarned - pointsToRedeem)
+        : (Number(selectedCustomer?.rewardPoints) || 0);
 
       const saleData = {
         invoiceNo,
@@ -388,7 +434,10 @@ const POSTerminal = () => {
         items: cart,
         subtotal,
         discountAmount: calculatedDiscount,
-        pointsRedeemed: pointsToRedeem,
+        pricingTier,
+        customerType: selectedCustomer?.customerType || pricingTier,
+        defaultInvoiceFormat: (pricingTier === 'wholesale' || pricingTier === 'dealer') ? 'a4' : 'pos',
+        pointsRedeemed: isRetailSale ? pointsToRedeem : 0,
         pointsRedeemedDiscount: pointsDiscount,
         customerRewardPoints: customerPrevPoints,
         finalCustomerPoints: finalCustomerPoints,
@@ -403,7 +452,7 @@ const POSTerminal = () => {
         customerName: selectedCustomer?.name || 'সাধারণ ক্রেতা',
         customerPhone: selectedCustomer?.phone || '',
         customerAddress: selectedCustomer?.address || '',
-        pointsEarned: selectedCustomer ? pointsEarned : 0,
+        pointsEarned: isRetailSale ? pointsEarned : 0,
         cashierId: currentUser?.uid || '',
         cashierName: userProfile?.name || userProfile?.email || 'Admin',
         createdAt: serverTimestamp()
@@ -425,16 +474,19 @@ const POSTerminal = () => {
         }
       }
 
-      // 3. Update Customer Stats & Loyalty Points
+      // 3. Update Customer Stats & Loyalty Points (points diff ONLY for retail)
       if (selectedCustomer?.id) {
         try {
           const cDoc = doc(db, 'shops', shopId, 'customers', selectedCustomer.id);
-          const pointsDiff = pointsEarned - pointsToRedeem;
-          await updateDoc(cDoc, {
+          const updateFields = {
             totalPurchases: increment(grandTotal),
-            dueAmount: increment(actualDue),
-            rewardPoints: increment(pointsDiff)
-          });
+            dueAmount: increment(actualDue)
+          };
+          if (isRetailSale) {
+            const pointsDiff = pointsEarned - pointsToRedeem;
+            updateFields.rewardPoints = increment(pointsDiff);
+          }
+          await updateDoc(cDoc, updateFields);
         } catch (e) {
           console.warn("Customer update error:", e);
         }
@@ -637,9 +689,18 @@ const POSTerminal = () => {
                   paddingTop: '6px'
                 }}>
                   <div>
-                    <span style={{ fontSize: '15px', fontWeight: '800', color: '#2563eb' }}>
-                      {formatCurrency(p.sellingPrice || p.price)}
+                    <span style={{
+                      fontSize: '15px',
+                      fontWeight: '800',
+                      color: pricingTier === 'dealer' ? '#7c3aed' : pricingTier === 'wholesale' ? '#059669' : '#2563eb'
+                    }}>
+                      {formatCurrency(getTierPrice(p))}
                     </span>
+                    {pricingTier !== 'retail' && (
+                      <span style={{ fontSize: '10px', display: 'block', color: '#64748b' }}>
+                        (খুচরা: {formatCurrency(p.sellingPrice || p.price)})
+                      </span>
+                    )}
                   </div>
 
                   {/* Stock Badge */}
@@ -677,6 +738,49 @@ const POSTerminal = () => {
         boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)',
         overflow: 'hidden'
       }}>
+        {/* Pricing Tier Selector (Retail, Wholesale, Dealer) */}
+        <div style={{
+          padding: '8px 16px',
+          background: '#f8fafc',
+          borderBottom: '1px solid #e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+          flexWrap: 'wrap'
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: '800', color: '#475569' }}>
+            বিক্রয় ধরণ (Tier):
+          </span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {[
+              { id: 'retail', label: '🛒 খুচরা (Retail)', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
+              { id: 'wholesale', label: '📦 পাইকারি (Wholesale)', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0' },
+              { id: 'dealer', label: '🏢 ডিলার (Dealer)', color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' }
+            ].map((tier) => (
+              <button
+                key={tier.id}
+                type="button"
+                onClick={() => handleSwitchTier(tier.id)}
+                style={{
+                  padding: '5px 9px',
+                  borderRadius: '6px',
+                  border: '1px solid',
+                  borderColor: pricingTier === tier.id ? tier.color : '#cbd5e1',
+                  background: pricingTier === tier.id ? tier.bg : '#ffffff',
+                  color: pricingTier === tier.id ? tier.color : '#64748b',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  boxShadow: pricingTier === tier.id ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
+                }}
+              >
+                {tier.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Customer Select Bar */}
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', position: 'relative' }}>
           {!selectedCustomer ? (
@@ -777,7 +881,8 @@ const POSTerminal = () => {
                         setSelectedCustomer(c);
                         setIsCustomerDropdownOpen(false);
                         setCustomerSearchQuery('');
-                        setPointsToRedeem(0);
+                        const targetTier = c.customerType || 'retail';
+                        handleSwitchTier(targetTier);
                       }}
                       style={{
                         padding: '8px 12px',
@@ -790,12 +895,30 @@ const POSTerminal = () => {
                       }}
                     >
                       <div>
-                        <div style={{ fontWeight: '700', color: '#0f172a' }}>{c.name}</div>
+                        <div style={{ fontWeight: '700', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {c.name}
+                          <span style={{
+                            fontSize: '10px',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            fontWeight: '700',
+                            background: c.customerType === 'dealer' ? '#f5f3ff' : c.customerType === 'wholesale' ? '#ecfdf5' : '#eff6ff',
+                            color: c.customerType === 'dealer' ? '#7c3aed' : c.customerType === 'wholesale' ? '#059669' : '#2563eb'
+                          }}>
+                            {c.customerType === 'dealer' ? 'ডিলার' : c.customerType === 'wholesale' ? 'পাইকারি' : 'খুচরা'}
+                          </span>
+                        </div>
                         <div style={{ fontSize: '11px', color: '#64748b' }}>📱 {c.phone}</div>
                       </div>
-                      <span style={{ fontSize: '11px', fontWeight: '700', background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: '4px' }}>
-                        🎁 {c.rewardPoints || 0} pt
-                      </span>
+                      {(c.customerType || 'retail') === 'retail' ? (
+                        <span style={{ fontSize: '11px', fontWeight: '700', background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: '4px' }}>
+                          🎁 {c.rewardPoints || 0} pt
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          পয়েন্ট নেই
+                        </span>
+                      )}
                     </div>
                   ))}
 
@@ -829,15 +952,26 @@ const POSTerminal = () => {
           ) : (
             /* Selected Customer Card with Loyalty Points & Redeem */
             <div style={{
-              background: '#eff6ff',
-              border: '1px solid #bfdbfe',
+              background: pricingTier === 'dealer' ? '#f5f3ff' : pricingTier === 'wholesale' ? '#ecfdf5' : '#eff6ff',
+              border: '1px solid',
+              borderColor: pricingTier === 'dealer' ? '#ddd6fe' : pricingTier === 'wholesale' ? '#a7f3d0' : '#bfdbfe',
               borderRadius: '8px',
               padding: '10px 12px'
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <div>
-                  <div style={{ fontWeight: '700', fontSize: '14px', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: pricingTier === 'dealer' ? '#5b21b6' : pricingTier === 'wholesale' ? '#065f46' : '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <MdPerson size={16} /> {selectedCustomer.name}
+                    <span style={{
+                      fontSize: '10px',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontWeight: '800',
+                      background: '#ffffff',
+                      color: pricingTier === 'dealer' ? '#7c3aed' : pricingTier === 'wholesale' ? '#059669' : '#2563eb'
+                    }}>
+                      {pricingTier === 'dealer' ? 'ডিলার কাস্টমার' : pricingTier === 'wholesale' ? 'পাইকারি কাস্টমার' : 'খুচরা ক্রেতা'}
+                    </span>
                   </div>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>
                     📱 {selectedCustomer.phone}
@@ -864,62 +998,77 @@ const POSTerminal = () => {
                 </button>
               </div>
 
-              {/* Loyalty Points Redeem Control */}
-              <div style={{
-                borderTop: '1px dashed #bfdbfe',
-                paddingTop: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: '12px'
-              }}>
-                <div>
-                  <span style={{ color: '#1e40af', fontWeight: '700' }}>🎁 পয়েন্ট ব্যালান্স: </span>
-                  <span style={{ fontWeight: '800', color: '#2563eb' }}>{selectedCustomer.rewardPoints || 0} টি</span>
-                  <span style={{ color: '#64748b' }}> (মান: ৳{selectedCustomer.rewardPoints || 0})</span>
-                </div>
-
-                {(selectedCustomer.rewardPoints || 0) > 0 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <input
-                      type="number"
-                      min="0"
-                      max={Math.min(selectedCustomer.rewardPoints || 0, subtotal)}
-                      value={pointsToRedeem || ''}
-                      onChange={(e) => {
-                        const val = Math.min(Number(e.target.value) || 0, selectedCustomer.rewardPoints || 0, subtotal);
-                        setPointsToRedeem(val);
-                      }}
-                      placeholder="পয়েন্ট"
-                      style={{ width: '55px', padding: '2px 4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #93c5fd', textAlign: 'center' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (pointsToRedeem > 0) {
-                          setPointsToRedeem(0);
-                        } else {
-                          const maxRedeem = Math.min(selectedCustomer.rewardPoints || 0, subtotal);
-                          setPointsToRedeem(maxRedeem);
-                          toast.success(`${maxRedeem} পয়েন্ট রিডিম করা হয়েছে!`);
-                        }
-                      }}
-                      style={{
-                        background: pointsToRedeem > 0 ? '#ef4444' : '#10b981',
-                        color: '#ffffff',
-                        border: 'none',
-                        padding: '3px 8px',
-                        borderRadius: '4px',
-                        fontWeight: '700',
-                        fontSize: '11px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {pointsToRedeem > 0 ? 'রদ' : 'সর্বোচ্চ রিডিম'}
-                    </button>
+              {/* Loyalty Points: strictly for retail only */}
+              {isRetailSale ? (
+                <div style={{
+                  borderTop: '1px dashed #bfdbfe',
+                  paddingTop: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '12px'
+                }}>
+                  <div>
+                    <span style={{ color: '#1e40af', fontWeight: '700' }}>🎁 পয়েন্ট ব্যালান্স: </span>
+                    <span style={{ fontWeight: '800', color: '#2563eb' }}>{selectedCustomer.rewardPoints || 0} টি</span>
+                    <span style={{ color: '#64748b' }}> (মান: ৳{selectedCustomer.rewardPoints || 0})</span>
                   </div>
-                )}
-              </div>
+
+                  {(selectedCustomer.rewardPoints || 0) > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="number"
+                        min="0"
+                        max={Math.min(selectedCustomer.rewardPoints || 0, subtotal)}
+                        value={pointsToRedeem || ''}
+                        onChange={(e) => {
+                          const val = Math.min(Number(e.target.value) || 0, selectedCustomer.rewardPoints || 0, subtotal);
+                          setPointsToRedeem(val);
+                        }}
+                        placeholder="পয়েন্ট"
+                        style={{ width: '55px', padding: '2px 4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #93c5fd', textAlign: 'center' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (pointsToRedeem > 0) {
+                            setPointsToRedeem(0);
+                          } else {
+                            const maxRedeem = Math.min(selectedCustomer.rewardPoints || 0, subtotal);
+                            setPointsToRedeem(maxRedeem);
+                            toast.success(`${maxRedeem} পয়েন্ট রিডিম করা হয়েছে!`);
+                          }
+                        }}
+                        style={{
+                          background: pointsToRedeem > 0 ? '#ef4444' : '#10b981',
+                          color: '#ffffff',
+                          border: 'none',
+                          padding: '3px 8px',
+                          borderRadius: '4px',
+                          fontWeight: '700',
+                          fontSize: '11px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {pointsToRedeem > 0 ? 'রদ' : 'সর্বোচ্চ রিডিম'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{
+                  borderTop: '1px dashed #cbd5e1',
+                  paddingTop: '6px',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  color: '#b45309',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  🔒 পাইকারি ও ডিলার বিক্রয়ে কোনো রিওয়ার্ড পয়েন্ট প্রযোজ্য নয় (ইনভয়েস হবে A4 / ক্যাশ মেমো)
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1290,13 +1439,8 @@ const POSTerminal = () => {
       {isCustomerModalOpen && (
         <QuickAddCustomerModal
           shopId={shopId}
-          initialPhone={customerSearchQuery}
           onClose={() => setIsCustomerModalOpen(false)}
-          onCustomerAdded={(newCust) => {
-            setSelectedCustomer(newCust);
-            setCustomerSearchQuery('');
-            setIsCustomerDropdownOpen(false);
-          }}
+          onCustomerAdded={(newCust) => setSelectedCustomer(newCust)}
         />
       )}
 
