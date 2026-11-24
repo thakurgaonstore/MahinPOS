@@ -115,6 +115,7 @@ function App() {
                   <Route index element={<DashboardHome />} />
                   <Route path="pos" element={<POSTerminal />} />
                   <Route path="sales" element={<SalesList />} />
+                  <Route path="returns" element={<SalesList defaultTab="return" />} />
                   <Route path="inventory" element={<ProductList />} />
                   <Route path="low-stock" element={<LowStockAlerts />} />
                   <Route path="barcodes" element={<BarcodePrintCenter />} />

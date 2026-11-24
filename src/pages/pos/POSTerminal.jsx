@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   collection,
   query,
@@ -35,10 +36,12 @@ import {
   MdCardGiftcard,
   MdLocalOffer,
   MdReceipt,
-  MdClear
+  MdClear,
+  MdAssignmentReturn
 } from 'react-icons/md';
 
 const POSTerminal = () => {
+  const navigate = useNavigate();
   const { userProfile, currentUser } = useAuth();
   const shopId = userProfile?.shopId || 'main-shop';
 
@@ -579,6 +582,30 @@ const POSTerminal = () => {
               <MdQrCodeScanner size={18} />
               <span>স্ক্যানার চালু</span>
             </div>
+
+            {/* Quick Product Return & Refund Button */}
+            <button
+              onClick={() => navigate('/dashboard/returns')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: '#fef2f2',
+                border: '1.5px solid #fecaca',
+                padding: '8px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                color: '#dc2626',
+                fontWeight: '700',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.2s'
+              }}
+              title="পণ্য ফেরত ও রিফান্ড কাউন্টার"
+            >
+              <MdAssignmentReturn size={16} />
+              <span>পণ্য রিটার্ন</span>
+            </button>
           </div>
 
           {/* Category Chips */}

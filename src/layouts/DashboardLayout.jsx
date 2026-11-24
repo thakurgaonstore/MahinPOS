@@ -25,7 +25,8 @@ import {
   MdClose,
   MdFullscreen,
   MdFullscreenExit,
-  MdAdminPanelSettings
+  MdAdminPanelSettings,
+  MdAssignmentReturn
 } from 'react-icons/md';
 
 const DashboardLayout = () => {
@@ -118,6 +119,7 @@ const DashboardLayout = () => {
     { name: 'ড্যাশবোর্ড (Overview)', path: '/dashboard', icon: <MdDashboard />, show: true },
     { name: '⚡ POS বিলিং কাউন্টার', path: '/dashboard/pos', icon: <MdPointOfSale />, show: true },
     { name: 'বিক্রয় ও ইনভয়েস', path: '/dashboard/sales', icon: <MdShoppingCart />, show: true },
+    { name: '🔄 পণ্য রিটার্ন ও রিফান্ড', path: '/dashboard/returns', icon: <MdAssignmentReturn />, show: true },
     { name: 'পণ্য ও ইনভেন্টরি', path: '/dashboard/inventory', icon: <MdInventory />, show: isOwnerOrManager },
     { name: 'কম স্টক এলার্ট', path: '/dashboard/low-stock', icon: <MdWarning />, badge: lowStockCount > 0 ? lowStockCount : null, show: true },
     { name: 'বারকোড স্টিকার প্রিন্ট', path: '/dashboard/barcodes', icon: <MdQrCode />, show: isOwnerOrManager },

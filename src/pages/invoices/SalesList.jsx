@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit, getDoc, doc } from 'firebase/firestore';
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { collection, onSnapshot, query, orderBy, limit, getDoc, doc, where, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
+import { toast } from 'react-hot-toast';
 import InvoiceViewModal from './InvoiceViewModal';
 import ProductReturnModal from './ProductReturnModal';
 import {
@@ -17,20 +19,108 @@ import {
 } from 'react-icons/md';
 import * as XLSX from 'xlsx';
 
-const SalesList = () => {
+const SalesList = ({ defaultTab }) => {
+  const [searchParams] = useSearchParams();
+  const location = useLocation();
+  const isReturnMode = defaultTab === 'return' || searchParams.get('tab') === 'return' || location.pathname.includes('/returns');
+
   const { userProfile } = useAuth();
   const shopId = userProfile?.shopId || 'main-shop';
 
   const [sales, setSales] = useState([]);
   const [search, setSearch] = useState('');
   const [filterPayment, setFilterPayment] = useState('All');
-  const [timeFilter, setTimeFilter] = useState('today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
+  const [timeFilter, setTimeFilter] = useState(isReturnMode ? 'all' : 'today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [viewFilter, setViewFilter] = useState(isReturnMode ? 'returns' : 'all'); // 'all' | 'returns'
+
+  // Return Counter direct search
+  const [returnSearchNo, setReturnSearchNo] = useState('');
+  const [isSearchingReturn, setIsSearchingReturn] = useState(false);
+  const returnInputRef = useRef(null);
 
   const [viewInvoice, setViewInvoice] = useState(null);
   const [returnInvoice, setReturnInvoice] = useState(null);
   const [shopConfig, setShopConfig] = useState(null);
+
+  // Auto focus return input if in return mode
+  useEffect(() => {
+    if (isReturnMode && returnInputRef.current) {
+      returnInputRef.current.focus();
+    }
+  }, [isReturnMode]);
+
+  // Direct Invoice Lookup for Return & Refund (Checks loaded sales first, then Firestore directly)
+  const handleDirectReturnSearch = async (e) => {
+    if (e) e.preventDefault();
+    const cleanNo = returnSearchNo.trim().replace(/^#/, '');
+    if (!cleanNo) {
+      toast.error('অনুগ্রহ করে ইনভয়েস নম্বরটি লিখুন বা স্ক্যান করুন');
+      return;
+    }
+
+    // 1. First check loaded sales
+    const match = sales.find(s => 
+      String(s.invoiceNo || '').replace(/^#/, '').toLowerCase() === cleanNo.toLowerCase() ||
+      String(s.id || '').toLowerCase() === cleanNo.toLowerCase()
+    );
+
+    if (match) {
+      if (match.returnStatus === 'full') {
+        toast.error(`ইনভয়েস #${match.invoiceNo} এর সকল পণ্য ইতোমধ্যে সম্পূর্ণ ফেরত দেওয়া হয়েছে`);
+      }
+      setReturnInvoice(match);
+      toast.success(`ইনভয়েস #${match.invoiceNo} পাওয়া গেছে!`);
+      return;
+    }
+
+    // 2. Query Firestore directly for old / archived invoices not in the latest 150 loaded list
+    setIsSearchingReturn(true);
+    try {
+      const salesRef = collection(db, 'shops', shopId, 'sales');
+      // Search exact cleanNo
+      let qSales = query(salesRef, where('invoiceNo', '==', cleanNo));
+      let snap = await getDocs(qSales);
+
+      if (snap.empty) {
+        // Search with #
+        qSales = query(salesRef, where('invoiceNo', '==', '#' + cleanNo));
+        snap = await getDocs(qSales);
+      }
+
+      if (snap.empty) {
+        // Try doc ID
+        const docSnap = await getDoc(doc(db, 'shops', shopId, 'sales', cleanNo));
+        if (docSnap.exists()) {
+          const docData = { id: docSnap.id, ...docSnap.data() };
+          if (docData.returnStatus === 'full') {
+            toast.error(`ইনভয়েস #${docData.invoiceNo} ইতোমধ্যে সম্পূর্ণ ফেরত দেওয়া হয়েছে`);
+          }
+          setReturnInvoice(docData);
+          toast.success(`ইনভয়েস #${docData.invoiceNo} পাওয়া গেছে!`);
+          setIsSearchingReturn(false);
+          return;
+        }
+      }
+
+      if (!snap.empty) {
+        const docData = { id: snap.docs[0].id, ...snap.docs[0].data() };
+        if (docData.returnStatus === 'full') {
+          toast.error(`ইনভয়েস #${docData.invoiceNo} ইতোমধ্যে সম্পূর্ণ ফেরত দেওয়া হয়েছে`);
+        }
+        setReturnInvoice(docData);
+        toast.success(`ইনভয়েস #${docData.invoiceNo} পাওয়া গেছে!`);
+      } else {
+        toast.error(`দুঃখিত, "${cleanNo}" নম্বরের কোনো ইনভয়েস খুঁজে পাওয়া যায়নি`);
+      }
+    } catch (err) {
+      console.error("Direct return search error:", err);
+      toast.error('ইনভয়েস খুঁজতে সমস্যা হয়েছে');
+    } finally {
+      setIsSearchingReturn(false);
+    }
+  };
 
   useEffect(() => {
     if (!shopId) return;
@@ -82,6 +172,9 @@ const SalesList = () => {
 
   const filteredSales = sales.filter((s) => {
     if (!isMatchDate(s.createdAt)) return false;
+    if (viewFilter === 'returns' && !(s.isReturned || (Number(s.totalRefundAmount) || 0) > 0 || s.returnStatus)) {
+      return false;
+    }
     const matchPay = filterPayment === 'All' || s.paymentMethod === filterPayment;
     if (!matchPay) return false;
     if (!search.trim()) return true;
@@ -130,30 +223,143 @@ const SalesList = () => {
       {/* Top Title & Excel Export */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a' }}>বিক্রয় ও ইনভয়েস হিস্ট্রি</h1>
+          <h1 style={{ fontSize: '24px', fontWeight: '800', color: isReturnMode ? '#be123c' : '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {isReturnMode ? '🔄 পণ্য রিটার্ন ও রিফান্ড কাউন্টার' : 'বিক্রয় ও ইনভয়েস হিস্ট্রি'}
+          </h1>
           <p style={{ fontSize: '13px', color: '#64748b' }}>
-            দৈনিক, মাসিক ও বাৎসরিক বিক্রয়ের হিসাব, ইনভয়েস রিপ্রিন্ট এবং পণ্য রিটার্ন ম্যানেজমেন্ট
+            {isReturnMode
+              ? 'গ্রাহকের ফেরত দেওয়া পণ্য গ্রহণ করুন, রিফান্ড হিসাব করুন এবং ইনভেন্টরি স্টক সমন্বয় করুন'
+              : 'দৈনিক, মাসিক ও বাৎসরিক বিক্রয়ের হিসাব, ইনভয়েস রিপ্রিন্ট এবং পণ্য রিটার্ন ম্যানেজমেন্ট'}
           </p>
         </div>
 
-        <button
-          onClick={exportExcel}
-          style={{
-            padding: '9px 16px',
-            borderRadius: '8px',
-            border: '1px solid #cbd5e1',
-            background: '#ffffff',
-            color: '#334155',
-            fontWeight: '600',
-            fontSize: '13px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px'
-          }}
-        >
-          <MdFileDownload size={18} /> এক্সেল ডাউনলোড
-        </button>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* View Filter Mode Buttons */}
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '10px', gap: '4px' }}>
+            <button
+              onClick={() => setViewFilter('all')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                border: 'none',
+                background: viewFilter === 'all' ? '#ffffff' : 'transparent',
+                color: viewFilter === 'all' ? '#0f172a' : '#64748b',
+                fontWeight: '700',
+                fontSize: '12px',
+                cursor: 'pointer',
+                boxShadow: viewFilter === 'all' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+              }}
+            >
+              🛒 সকল বিক্রয়
+            </button>
+            <button
+              onClick={() => setViewFilter('returns')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '8px',
+                border: 'none',
+                background: viewFilter === 'returns' ? '#e11d48' : 'transparent',
+                color: viewFilter === 'returns' ? '#ffffff' : '#64748b',
+                fontWeight: '700',
+                fontSize: '12px',
+                cursor: 'pointer',
+                boxShadow: viewFilter === 'returns' ? '0 1px 3px rgba(225,29,72,0.3)' : 'none'
+              }}
+            >
+              🔄 শুধুমাত্র রিটার্নকৃত ({sales.filter(s => s.isReturned || (s.totalRefundAmount || 0) > 0).length})
+            </button>
+          </div>
+
+          <button
+            onClick={exportExcel}
+            style={{
+              padding: '8px 14px',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              background: '#ffffff',
+              color: '#334155',
+              fontWeight: '600',
+              fontSize: '12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <MdFileDownload size={16} /> এক্সেল ডাউনলোড
+          </button>
+        </div>
+      </div>
+
+      {/* DEDICATED INSTANT RETURN COUNTER (High Visibility Bar) */}
+      <div style={{
+        background: 'linear-gradient(135deg, #fff1f2 0%, #fff7ed 100%)',
+        borderRadius: '14px',
+        border: '2px solid #fecdd3',
+        padding: '16px 20px',
+        marginBottom: '18px',
+        boxShadow: isReturnMode ? '0 0 0 3px rgba(225, 29, 72, 0.2), 0 4px 12px rgba(225, 29, 72, 0.1)' : '0 2px 8px rgba(0,0,0,0.03)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '20px' }}>🔄</span>
+            <span style={{ fontWeight: '800', color: '#9f1239', fontSize: '15px' }}>
+              তাৎক্ষণিক পণ্য রিটার্ন ও রিফান্ড সার্চ (Invoice Return Finder)
+            </span>
+            <span style={{ fontSize: '11px', background: '#ffe4e6', color: '#be123c', padding: '2px 8px', borderRadius: '12px', fontWeight: '700' }}>
+              যেকোনো তারিখের ইনভয়েস সাপোর্ট
+            </span>
+          </div>
+          <span style={{ fontSize: '12px', color: '#881337' }}>
+            💡 বারকোড স্ক্যানার দিয়ে ইনভয়েস বারকোড স্ক্যান করুন অথবা নম্বরটি লিখে এন্টার চাপুন
+          </span>
+        </div>
+
+        <form onSubmit={handleDirectReturnSearch} style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '260px' }}>
+            <MdSearch size={22} style={{ position: 'absolute', left: '12px', top: '10px', color: '#e11d48' }} />
+            <input
+              ref={returnInputRef}
+              type="text"
+              value={returnSearchNo}
+              onChange={(e) => setReturnSearchNo(e.target.value)}
+              placeholder="ইনভয়েস নং লিখুন বা স্ক্যান করুন (যেমন: 261124142553 বা 799859)..."
+              style={{
+                width: '100%',
+                padding: '10px 14px 10px 42px',
+                borderRadius: '8px',
+                border: '1.5px solid #fb7185',
+                background: '#ffffff',
+                fontSize: '14px',
+                fontWeight: '600',
+                outline: 'none',
+                color: '#0f172a'
+              }}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={isSearchingReturn}
+            style={{
+              background: 'linear-gradient(135deg, #e11d48, #be123c)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '8px',
+              padding: '10px 20px',
+              fontSize: '13px',
+              fontWeight: '700',
+              cursor: isSearchingReturn ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 4px 10px rgba(225, 29, 72, 0.3)'
+            }}
+          >
+            <MdAssignmentReturn size={16} />
+            <span>{isSearchingReturn ? 'অনুসন্ধান হচ্ছে...' : 'ইনভয়েস বের করে রিটার্ন প্রসেস করুন'}</span>
+          </button>
+        </form>
       </div>
 
       {/* Date Range Tabs: দৈনিক, মাসিক, বাৎসরিক, এ পর্যন্ত */}
@@ -401,18 +607,18 @@ const SalesList = () => {
                         <MdPrint size={14} /> প্রিন্ট
                       </button>
 
-                      {!isFullReturned && (
+                      {!isFullReturned ? (
                         <button
                           onClick={() => setReturnInvoice(s)}
                           title="পণ্য ফেরত ও রিফান্ড দিন"
                           style={{
-                            padding: '5px 10px',
+                            padding: '6px 12px',
                             borderRadius: '6px',
-                            border: '1px solid #fecaca',
-                            background: '#fef2f2',
-                            color: '#dc2626',
+                            border: '1px solid #f87171',
+                            background: '#fee2e2',
+                            color: '#b91c1c',
                             fontSize: '12px',
-                            fontWeight: '700',
+                            fontWeight: '800',
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -421,6 +627,10 @@ const SalesList = () => {
                         >
                           <MdAssignmentReturn size={14} /> রিটার্ন
                         </button>
+                      ) : (
+                        <span style={{ fontSize: '11px', color: '#94a3b8', padding: '4px 6px', fontStyle: 'italic' }}>
+                          ফেরত সম্পন্ন
+                        </span>
                       )}
                     </div>
                   </td>
