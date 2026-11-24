@@ -57,6 +57,12 @@ const AccountsDashboard = () => {
   const [expenseSearch, setExpenseSearch] = useState('');
   const [purchaseSearch, setPurchaseSearch] = useState('');
 
+  // Pagination for Ledgers (100 records = 4 pages of 25 items)
+  const [expensePage, setExpensePage] = useState(1);
+  const [purchasePage, setPurchasePage] = useState(1);
+  const [cogsPage, setCogsPage] = useState(1);
+  const itemsPerPage = 25;
+
   const ledgerSectionRef = useRef(null);
 
   const scrollToLedger = (tab) => {
@@ -74,24 +80,24 @@ const AccountsDashboard = () => {
       setArchivedSummaries(summaries || []);
     });
 
-    // Realtime Sales (latest 300)
-    const salesQuery = query(collection(db, 'shops', shopId, 'sales'), orderBy('createdAt', 'desc'), limit(300));
+    // Realtime Sales (latest 100 for fast loading and low quota)
+    const salesQuery = query(collection(db, 'shops', shopId, 'sales'), orderBy('createdAt', 'desc'), limit(100));
     const unsubSales = onSnapshot(salesQuery, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setSales(list);
     });
 
-    // Realtime Expenses (latest 300)
-    const expQuery = query(collection(db, 'shops', shopId, 'expenses'), orderBy('createdAt', 'desc'), limit(300));
+    // Realtime Expenses (latest 100)
+    const expQuery = query(collection(db, 'shops', shopId, 'expenses'), orderBy('createdAt', 'desc'), limit(100));
     const unsubExp = onSnapshot(expQuery, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setExpenses(list);
     });
 
-    // Realtime Stock Inward / Purchase Logs (latest 300)
-    const stockQuery = query(collection(db, 'shops', shopId, 'stock_logs'), orderBy('createdAt', 'desc'), limit(300));
+    // Realtime Stock Inward / Purchase Logs (latest 100)
+    const stockQuery = query(collection(db, 'shops', shopId, 'stock_logs'), orderBy('createdAt', 'desc'), limit(100));
     const unsubStock = onSnapshot(stockQuery, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -100,8 +106,8 @@ const AccountsDashboard = () => {
       console.warn("Stock logs listener warning:", err);
     });
 
-    // Realtime Products (for initial stock & excel uploaded products)
-    const prodsQuery = query(collection(db, 'shops', shopId, 'products'), limit(300));
+    // Realtime Products (latest 100)
+    const prodsQuery = query(collection(db, 'shops', shopId, 'products'), limit(100));
     const unsubProds = onSnapshot(prodsQuery, (snap) => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
@@ -323,6 +329,29 @@ const AccountsDashboard = () => {
       (l.voucherNo || '').toLowerCase().includes(q)
     );
   });
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setExpensePage(1);
+  }, [timeRange, expenseSearch]);
+
+  useEffect(() => {
+    setPurchasePage(1);
+  }, [timeRange, purchaseSearch, purchaseViewMode]);
+
+  useEffect(() => {
+    setCogsPage(1);
+  }, [timeRange]);
+
+  // Paginated slices for transaction ledgers (25 per page, up to 4 pages for 100 items)
+  const totalExpensePages = Math.max(1, Math.ceil(searchedExpenses.length / itemsPerPage));
+  const paginatedExpenses = searchedExpenses.slice((expensePage - 1) * itemsPerPage, expensePage * itemsPerPage);
+
+  const totalPurchasePages = Math.max(1, Math.ceil(searchedPurchases.length / itemsPerPage));
+  const paginatedPurchases = searchedPurchases.slice((purchasePage - 1) * itemsPerPage, purchasePage * itemsPerPage);
+
+  const totalCogsPages = Math.max(1, Math.ceil(cogsList.length / itemsPerPage));
+  const paginatedCogs = cogsList.slice((cogsPage - 1) * itemsPerPage, cogsPage * itemsPerPage);
 
   return (
     <div>
@@ -761,7 +790,7 @@ const AccountsDashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {searchedExpenses.map((e) => (
+                  {paginatedExpenses.map((e) => (
                     <tr key={e.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                       <td style={{ padding: '10px', color: '#64748b' }}>
                         {formatDate(e.createdAt || e.date)}
@@ -803,6 +832,43 @@ const AccountsDashboard = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Tab 1 Pagination */}
+            {totalExpensePages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  দেখানো হচ্ছে {((expensePage - 1) * itemsPerPage) + 1} - {Math.min(expensePage * itemsPerPage, searchedExpenses.length)} / মোট {searchedExpenses.length} টি (পেজ {expensePage} / {totalExpensePages})
+                </span>
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    disabled={expensePage === 1}
+                    onClick={() => setExpensePage(prev => Math.max(1, prev - 1))}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: expensePage === 1 ? '#f8fafc' : '#ffffff', color: expensePage === 1 ? '#94a3b8' : '#334155', fontSize: '11px', fontWeight: '700', cursor: expensePage === 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    পূর্ববর্তী
+                  </button>
+                  {Array.from({ length: totalExpensePages }, (_, i) => i + 1).map((pageNum) => (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => setExpensePage(pageNum)}
+                      style={{ padding: '4px 9px', borderRadius: '6px', border: '1px solid', borderColor: expensePage === pageNum ? '#2563eb' : '#cbd5e1', background: expensePage === pageNum ? '#2563eb' : '#ffffff', color: expensePage === pageNum ? '#ffffff' : '#334155', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={expensePage === totalExpensePages}
+                    onClick={() => setExpensePage(prev => Math.min(totalExpensePages, prev + 1))}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: expensePage === totalExpensePages ? '#f8fafc' : '#ffffff', color: expensePage === totalExpensePages ? '#94a3b8' : '#334155', fontSize: '11px', fontWeight: '700', cursor: expensePage === totalExpensePages ? 'not-allowed' : 'pointer' }}
+                  >
+                    পরবর্তী
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -909,7 +975,7 @@ const AccountsDashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {searchedPurchases.map((l) => {
+                  {paginatedPurchases.map((l) => {
                     const batchCost = Number(l.batchTotalCost) || (Number(l.addedQuantity || 0) * Number(l.purchaseCostPrice || 0));
 
                     return (
@@ -1005,6 +1071,43 @@ const AccountsDashboard = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Tab 2 Pagination */}
+            {totalPurchasePages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  দেখানো হচ্ছে {((purchasePage - 1) * itemsPerPage) + 1} - {Math.min(purchasePage * itemsPerPage, searchedPurchases.length)} / মোট {searchedPurchases.length} টি (পেজ {purchasePage} / {totalPurchasePages})
+                </span>
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    disabled={purchasePage === 1}
+                    onClick={() => setPurchasePage(prev => Math.max(1, prev - 1))}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: purchasePage === 1 ? '#f8fafc' : '#ffffff', color: purchasePage === 1 ? '#94a3b8' : '#334155', fontSize: '11px', fontWeight: '700', cursor: purchasePage === 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    পূর্ববর্তী
+                  </button>
+                  {Array.from({ length: totalPurchasePages }, (_, i) => i + 1).map((pageNum) => (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => setPurchasePage(pageNum)}
+                      style={{ padding: '4px 9px', borderRadius: '6px', border: '1px solid', borderColor: purchasePage === pageNum ? '#2563eb' : '#cbd5e1', background: purchasePage === pageNum ? '#2563eb' : '#ffffff', color: purchasePage === pageNum ? '#ffffff' : '#334155', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={purchasePage === totalPurchasePages}
+                    onClick={() => setPurchasePage(prev => Math.min(totalPurchasePages, prev + 1))}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: purchasePage === totalPurchasePages ? '#f8fafc' : '#ffffff', color: purchasePage === totalPurchasePages ? '#94a3b8' : '#334155', fontSize: '11px', fontWeight: '700', cursor: purchasePage === totalPurchasePages ? 'not-allowed' : 'pointer' }}
+                  >
+                    পরবর্তী
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1035,7 +1138,7 @@ const AccountsDashboard = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {cogsList.map((item, idx) => {
+                  {paginatedCogs.map((item, idx) => {
                     const itemProfit = item.totalSales - item.totalCost;
                     const margin = item.totalSales > 0 ? Math.round((itemProfit / item.totalSales) * 100) : 0;
 
@@ -1079,6 +1182,43 @@ const AccountsDashboard = () => {
                 </tbody>
               </table>
             </div>
+
+            {/* Tab 3 Pagination */}
+            {totalCogsPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px', flexWrap: 'wrap', gap: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '10px' }}>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  দেখানো হচ্ছে {((cogsPage - 1) * itemsPerPage) + 1} - {Math.min(cogsPage * itemsPerPage, cogsList.length)} / মোট {cogsList.length} টি (পেজ {cogsPage} / {totalCogsPages})
+                </span>
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    disabled={cogsPage === 1}
+                    onClick={() => setCogsPage(prev => Math.max(1, prev - 1))}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: cogsPage === 1 ? '#f8fafc' : '#ffffff', color: cogsPage === 1 ? '#94a3b8' : '#334155', fontSize: '11px', fontWeight: '700', cursor: cogsPage === 1 ? 'not-allowed' : 'pointer' }}
+                  >
+                    পূর্ববর্তী
+                  </button>
+                  {Array.from({ length: totalCogsPages }, (_, i) => i + 1).map((pageNum) => (
+                    <button
+                      key={pageNum}
+                      type="button"
+                      onClick={() => setCogsPage(pageNum)}
+                      style={{ padding: '4px 9px', borderRadius: '6px', border: '1px solid', borderColor: cogsPage === pageNum ? '#059669' : '#cbd5e1', background: cogsPage === pageNum ? '#059669' : '#ffffff', color: cogsPage === pageNum ? '#ffffff' : '#334155', fontSize: '11px', fontWeight: '800', cursor: 'pointer' }}
+                    >
+                      {pageNum}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    disabled={cogsPage === totalCogsPages}
+                    onClick={() => setCogsPage(prev => Math.min(totalCogsPages, prev + 1))}
+                    style={{ padding: '4px 8px', borderRadius: '6px', border: '1px solid #cbd5e1', background: cogsPage === totalCogsPages ? '#f8fafc' : '#ffffff', color: cogsPage === totalCogsPages ? '#94a3b8' : '#334155', fontSize: '11px', fontWeight: '700', cursor: cogsPage === totalCogsPages ? 'not-allowed' : 'pointer' }}
+                  >
+                    পরবর্তী
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

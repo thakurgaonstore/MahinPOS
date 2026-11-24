@@ -45,6 +45,14 @@ const ExpenseManager = () => {
   const [filterCategory, setFilterCategory] = useState('All');
   const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
 
+  // Pagination (100 records = 4 pages of 25 items)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [timeRange, searchQuery, filterCategory]);
+
   const categories = [
     'দোকান ভাড়া',
     'বিদ্যুৎ ও ইউটিলিটি বিল',
@@ -60,11 +68,11 @@ const ExpenseManager = () => {
   useEffect(() => {
     if (!shopId) return;
 
-    // Load recent 150 expenses ordered by createdAt desc to prevent quota exhaustion
+    // Load recent 100 expenses ordered by createdAt desc to minimize quota and ensure fast loading
     const q = query(
       collection(db, 'shops', shopId, 'expenses'),
       orderBy('createdAt', 'desc'),
-      limit(150)
+      limit(100)
     );
 
     const unsub = onSnapshot(q, (snap) => {
@@ -117,6 +125,10 @@ const ExpenseManager = () => {
   });
 
   const totalExpenseAmount = filteredExpenses.reduce((a, b) => a + (Number(b.amount) || 0), 0);
+
+  // Paginated Slicing
+  const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / itemsPerPage));
+  const paginatedExpenses = filteredExpenses.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handleAddExpense = async (e) => {
     e.preventDefault();
@@ -329,8 +341,8 @@ const ExpenseManager = () => {
             </div>
 
             {/* Quota optimization tag */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#059669', background: '#ecfdf5', padding: '3px 8px', borderRadius: '6px', fontWeight: '700' }}>
-              <MdFlashOn size={14} /> ফায়ারবেস অপ্টিমাইজড (সর্বশেষ ১৫০ রেকর্ড)
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#059669', background: '#ecfdf5', padding: '4px 9px', borderRadius: '6px', fontWeight: '700' }}>
+              <MdFlashOn size={14} /> অপ্টিমাইজড ভিউ (সর্বশেষ ১০০ রেকর্ড | ৪টি পেজিনেশন)
             </div>
           </div>
 
@@ -372,7 +384,7 @@ const ExpenseManager = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredExpenses.map((e) => (
+                {paginatedExpenses.map((e) => (
                   <tr key={e.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                     <td style={{ padding: '10px', color: '#64748b', fontSize: '12px' }}>
                       {formatDate(e.createdAt || e.date)}
@@ -430,6 +442,73 @@ const ExpenseManager = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Clean Pagination Bar (25 items per page, up to 4 pages for 100 items) */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '10px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+              <span style={{ fontSize: '12px', color: '#64748b' }}>
+                দেখানো হচ্ছে {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, filteredExpenses.length)} / মোট {filteredExpenses.length} টি রেকর্ড (পেজ {currentPage} / {totalPages})
+              </span>
+              <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: currentPage === 1 ? '#f8fafc' : '#ffffff',
+                    color: currentPage === 1 ? '#94a3b8' : '#334155',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  পূর্ববর্তী
+                </button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+                  <button
+                    key={pageNum}
+                    type="button"
+                    onClick={() => setCurrentPage(pageNum)}
+                    style={{
+                      padding: '5px 11px',
+                      borderRadius: '6px',
+                      border: '1px solid',
+                      borderColor: currentPage === pageNum ? '#2563eb' : '#cbd5e1',
+                      background: currentPage === pageNum ? '#2563eb' : '#ffffff',
+                      color: currentPage === pageNum ? '#ffffff' : '#334155',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {pageNum}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: currentPage === totalPages ? '#f8fafc' : '#ffffff',
+                    color: currentPage === totalPages ? '#94a3b8' : '#334155',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  পরবর্তী
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -313,14 +313,14 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
               {/* Real-time Document Count Feedback */}
               <div style={{ marginTop: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                 {loadingDetectedYears ? (
-                  <span style={{ color: '#64748b' }}>ফায়ারবেস থেকে ইনভয়েসের সাল স্ক্যান হচ্ছে...</span>
+                  <span style={{ color: '#64748b' }}>ডাটাবেস থেকে ইনভয়েসের সাল স্ক্যান হচ্ছে...</span>
                 ) : currentSelectedCount > 0 ? (
                   <span style={{ color: '#059669', fontWeight: '700', background: '#ecfdf5', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
                     ✓ নির্বাচিত {resolvedTargetYear} সালে মোট {currentSelectedCount} টি ইনভয়েস পাওয়া গেছে যা আর্কাইভ করা হবে।
                   </span>
                 ) : (
                   <span style={{ color: '#64748b', background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px' }}>
-                    ℹ️ নির্বাচিত {resolvedTargetYear} সালে বর্তমানে ফায়ারবেসে কোনো ইনভয়েস পাওয়া যায়নি।
+                    ℹ️ নির্বাচিত {resolvedTargetYear} সালে বর্তমানে ডাটাবেসে কোনো ইনভয়েস পাওয়া যায়নি।
                   </span>
                 )}
               </div>

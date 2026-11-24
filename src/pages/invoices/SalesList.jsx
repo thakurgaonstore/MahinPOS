@@ -40,6 +40,14 @@ const SalesList = ({ defaultTab }) => {
   const [customEndDate, setCustomEndDate] = useState('');
   const [viewFilter, setViewFilter] = useState(isReturnMode ? 'returns' : 'all'); // 'all' | 'returns'
 
+  // Pagination (100 records = 4 pages of 25 items)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 25;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [timeFilter, search, filterPayment, viewFilter]);
+
   // Return Counter direct search
   const [returnSearchNo, setReturnSearchNo] = useState('');
   const [isSearchingReturn, setIsSearchingReturn] = useState(false);
@@ -130,9 +138,8 @@ const SalesList = ({ defaultTab }) => {
   useEffect(() => {
     if (!shopId) return;
 
-    // Firebase Spark Plan Optimization:
-    // Limit to latest 150-300 records to save Firestore reads
-    const fetchLimit = timeFilter === 'all' ? 300 : 150;
+    // Fast loading and low quota: limit to 100 records
+    const fetchLimit = 100;
     const ref = collection(db, 'shops', shopId, 'sales');
     const q = query(ref, orderBy('createdAt', 'desc'), limit(fetchLimit));
 
@@ -198,6 +205,10 @@ const SalesList = ({ defaultTab }) => {
   const netSales = grossSales - totalRefunds;
   const totalPaid = filteredSales.reduce((sum, s) => sum + (Number(s.paidAmount) || 0), 0);
   const totalDue = filteredSales.reduce((sum, s) => sum + (Number(s.dueAmount) || 0), 0);
+
+  // Paginated Slicing (25 per page, up to 4 pages for 100 sales)
+  const totalPages = Math.max(1, Math.ceil(filteredSales.length / itemsPerPage));
+  const paginatedSales = filteredSales.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const exportExcel = () => {
     const data = filteredSales.map((s, i) => ({
@@ -536,7 +547,7 @@ const SalesList = ({ defaultTab }) => {
             </tr>
           </thead>
           <tbody>
-            {filteredSales.map((s) => {
+            {paginatedSales.map((s) => {
               const isFullReturned = s.returnStatus === 'full';
               const isPartialReturned = s.returnStatus === 'partial';
 
@@ -677,6 +688,73 @@ const SalesList = ({ defaultTab }) => {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Bar (25 items per page, up to 4 pages for 100 sales) */}
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', marginBottom: '24px', flexWrap: 'wrap', gap: '10px', background: '#ffffff', padding: '12px 18px', borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.02)' }}>
+          <span style={{ fontSize: '13px', color: '#64748b' }}>
+            দেখানো হচ্ছে {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, filteredSales.length)} / মোট {filteredSales.length} টি ইনভয়েস (পেজ {currentPage} / {totalPages})
+          </span>
+          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+            <button
+              type="button"
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: currentPage === 1 ? '#f8fafc' : '#ffffff',
+                color: currentPage === 1 ? '#94a3b8' : '#334155',
+                fontSize: '12px',
+                fontWeight: '700',
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+              }}
+            >
+              পূর্ববর্তী
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
+              <button
+                key={pageNum}
+                type="button"
+                onClick={() => setCurrentPage(pageNum)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid',
+                  borderColor: currentPage === pageNum ? '#2563eb' : '#cbd5e1',
+                  background: currentPage === pageNum ? '#2563eb' : '#ffffff',
+                  color: currentPage === pageNum ? '#ffffff' : '#334155',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer'
+                }}
+              >
+                {pageNum}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: currentPage === totalPages ? '#f8fafc' : '#ffffff',
+                color: currentPage === totalPages ? '#94a3b8' : '#334155',
+                fontSize: '12px',
+                fontWeight: '700',
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
+              }}
+            >
+              পরবর্তী
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Invoice Viewer Modal */}
       {viewInvoice && (
