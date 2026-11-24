@@ -14,7 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, numberToBengaliWords } from '../../utils/formatters';
 import { hashPassword } from '../../utils/cryptoHelper';
 import { toast } from 'react-hot-toast';
 import PayrollSlipModal from './PayrollSlipModal';
@@ -73,13 +73,27 @@ const StaffManager = () => {
   const [payrollRecords, setPayrollRecords] = useState([]);
   const [advanceRecords, setAdvanceRecords] = useState([]);
 
-  // Payroll Disbursement Modal
+  // Payroll Disbursement Modal State
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [payingStaff, setPayingStaff] = useState(null);
-  const [payAmount, setPayAmount] = useState('');
+
+  // Detailed Earnings Heads
+  const [basicSalary, setBasicSalary] = useState('');
+  const [houseRent, setHouseRent] = useState('');
+  const [medical, setMedical] = useState('');
+  const [conveyance, setConveyance] = useState('');
+  const [bonus, setBonus] = useState('');
+  const [incentive, setIncentive] = useState('');
+  const [otherAllowance, setOtherAllowance] = useState('');
+
+  // Detailed Deductions Heads
+  const [advanceDeduction, setAdvanceDeduction] = useState('');
+  const [taxDeduction, setTaxDeduction] = useState('');
+  const [otherDeduction, setOtherDeduction] = useState('');
+  const [otherDeductionReason, setOtherDeductionReason] = useState('');
+
+  // Payment Method & Notes
   const [payMethod, setPayMethod] = useState('Cash'); // 'Cash' | 'bKash' | 'Bank'
-  const [bonusAmount, setBonusAmount] = useState('0');
-  const [deductionAmount, setDeductionAmount] = useState('0');
   const [payNote, setPayNote] = useState('');
 
   // Advance Salary Modal
@@ -258,10 +272,20 @@ const StaffManager = () => {
       .filter(a => a.staffId === staff.id)
       .reduce((sum, a) => sum + (Number(a.amount) || 0), 0);
 
-    const netPayable = Math.max(0, bSalary - staffAdvances);
-    setPayAmount(netPayable.toString());
-    setBonusAmount('0');
-    setDeductionAmount(staffAdvances.toString());
+    setBasicSalary(bSalary > 0 ? bSalary.toString() : '');
+    setHouseRent('');
+    setMedical('');
+    setConveyance('');
+    setBonus('');
+    setIncentive('');
+    setOtherAllowance('');
+
+    setAdvanceDeduction(staffAdvances > 0 ? staffAdvances.toString() : '0');
+    setTaxDeduction('');
+    setOtherDeduction('');
+    setOtherDeductionReason('');
+
+    setPayMethod('Cash');
     setPayNote(`বেতন পরিশোধ: ${selectedMonth}`);
     setIsPayModalOpen(true);
   };
@@ -269,57 +293,77 @@ const StaffManager = () => {
   // Disburse Salary & Record in Expenses
   const handleDisburseSalary = async (e) => {
     e.preventDefault();
-    if (!payingStaff || !payAmount) return;
+    if (!payingStaff) return;
+
+    const numBasic = Number(basicSalary) || 0;
+    const numHouseRent = Number(houseRent) || 0;
+    const numMedical = Number(medical) || 0;
+    const numConveyance = Number(conveyance) || 0;
+    const numBonus = Number(bonus) || 0;
+    const numIncentive = Number(incentive) || 0;
+    const numOtherAllowance = Number(otherAllowance) || 0;
+    const grossEarnings = numBasic + numHouseRent + numMedical + numConveyance + numBonus + numIncentive + numOtherAllowance;
+
+    const numAdvance = Number(advanceDeduction) || 0;
+    const numTax = Number(taxDeduction) || 0;
+    const numOtherDeduction = Number(otherDeduction) || 0;
+    const totalDeductions = numAdvance + numTax + numOtherDeduction;
+    const netPayable = Math.max(0, grossEarnings - totalDeductions);
 
     setLoading(true);
     try {
-      const finalPaid = Number(payAmount);
-      // 1. Record in payroll collection
-      const payrollRef = await addDoc(collection(db, 'shops', shopId, 'payroll'), {
+      // 1. Record detailed payroll document in payroll collection
+      const payrollData = {
         staffId: payingStaff.id,
         staffName: payingStaff.name,
         role: payingStaff.role,
         month: selectedMonth,
-        baseSalary: Number(payingStaff.baseSalary) || 0,
-        bonus: Number(bonusAmount) || 0,
-        deduction: Number(deductionAmount) || 0,
-        paidAmount: finalPaid,
+        // Earnings breakdown
+        baseSalary: numBasic,
+        houseRent: numHouseRent,
+        medical: numMedical,
+        conveyance: numConveyance,
+        bonus: numBonus,
+        incentive: numIncentive,
+        otherAllowance: numOtherAllowance,
+        grossEarnings,
+        // Deductions breakdown
+        advanceDeduction: numAdvance,
+        taxDeduction: numTax,
+        otherDeduction: numOtherDeduction,
+        otherDeductionReason: otherDeductionReason.trim(),
+        totalDeductions,
+        deduction: totalDeductions,
+        // Net Payable & Status
+        paidAmount: netPayable,
         paymentMethod: payMethod,
         note: payNote.trim(),
         paymentDate: new Date().toISOString().slice(0, 10),
         status: 'Paid',
         createdAt: serverTimestamp()
-      });
+      };
 
-      // 2. Automatically record in shop expenses so P&L and daily accounts reflect it!
+      const payrollRef = await addDoc(collection(db, 'shops', shopId, 'payroll'), payrollData);
+
+      // 2. Automatically record in shop expenses so P&L, Daily Accounts & Expenses reflect it!
+      const expenseNote = `মূল বেতন: ৳${numBasic} | মোট আয়: ৳${grossEarnings} | কর্তন: ৳${totalDeductions} | ভাউচার: #${payrollRef.id.slice(0, 8).toUpperCase()}${payNote ? ' (' + payNote + ')' : ''}`;
       await addDoc(collection(db, 'shops', shopId, 'expenses'), {
         title: `স্টাফ বেতন: ${payingStaff.name} (${selectedMonth})`,
-        amount: finalPaid,
+        amount: netPayable,
         category: 'স্টাফ বেতন ও বোনাস',
         paymentMethod: payMethod,
-        note: `রশিদ আইডি: ${payrollRef.id} | ${payNote}`,
+        note: expenseNote,
         createdAt: serverTimestamp()
       });
 
-      toast.success(`সফল! "${payingStaff.name}" কে ${formatCurrency(finalPaid)} বেতন প্রদান সম্পন্ন এবং খরচে যুক্ত হয়েছে।`);
+      toast.success(`সফল! "${payingStaff.name}" কে ${formatCurrency(netPayable)} বেতন পরিশোধ সম্পন্ন এবং একাউন্টস খরচে অন্তর্ভুক্ত হয়েছে।`);
       setIsPayModalOpen(false);
 
-      // Open printable payroll slip
+      // Open printable official pad payroll slip
       setViewingSlipRecord({
+        ...payrollData,
         id: payrollRef.id,
-        staffId: payingStaff.id,
-        staffName: payingStaff.name,
-        role: payingStaff.role,
-        staff: payingStaff,
-        month: selectedMonth,
-        baseSalary: Number(payingStaff.baseSalary) || 0,
-        bonus: Number(bonusAmount) || 0,
-        deduction: Number(deductionAmount) || 0,
-        paidAmount: finalPaid,
-        paymentMethod: payMethod,
-        note: payNote.trim(),
-        paymentDate: new Date().toISOString().slice(0, 10),
-        status: 'Paid'
+        staff: payingStaff
       });
 
       setPayingStaff(null);
@@ -1018,74 +1062,323 @@ const StaffManager = () => {
       )}
 
       {/* =========================================================================
-          MODAL 2: Salary Disbursement Modal
+          MODAL 2: Salary Disbursement Modal (Detailed Heads)
       ========================================================================= */}
-      {isPayModalOpen && payingStaff && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '24px' }}>
-            <h3 style={{ fontSize: '17px', fontWeight: '800', marginBottom: '14px', color: '#0f172a' }}>
-              💵 বেতন পরিশোধ ভাউচার
-            </h3>
-            <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '14px' }}>
-              কর্মী: <b>{payingStaff.name}</b> ({payingStaff.role}) | মূল বেতন: <b>{formatCurrency(payingStaff.baseSalary || 0)}</b>
-            </div>
+      {isPayModalOpen && payingStaff && (() => {
+        const numBasic = Number(basicSalary) || 0;
+        const numHouseRent = Number(houseRent) || 0;
+        const numMedical = Number(medical) || 0;
+        const numConveyance = Number(conveyance) || 0;
+        const numBonus = Number(bonus) || 0;
+        const numIncentive = Number(incentive) || 0;
+        const numOtherAllowance = Number(otherAllowance) || 0;
+        const grossEarnings = numBasic + numHouseRent + numMedical + numConveyance + numBonus + numIncentive + numOtherAllowance;
 
-            <form onSubmit={handleDisburseSalary} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>পরিশোধযোগ্য চূড়ান্ত টাকা (৳) *</label>
-                <input
-                  type="number"
-                  value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  required
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '16px', fontWeight: '800' }}
-                />
-              </div>
+        const numAdvance = Number(advanceDeduction) || 0;
+        const numTax = Number(taxDeduction) || 0;
+        const numOtherDeduction = Number(otherDeduction) || 0;
+        const totalDeductions = numAdvance + numTax + numOtherDeduction;
+        const netPayable = Math.max(0, grossEarnings - totalDeductions);
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>পেমেন্ট মাধ্যম</label>
-                <select
-                  value={payMethod}
-                  onChange={(e) => setPayMethod(e.target.value)}
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
-                >
-                  <option value="Cash">ক্যাশ (Cash Drawer)</option>
-                  <option value="bKash">বিকাশ (bKash)</option>
-                  <option value="Bank">ব্যাংক একাউন্ট</option>
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>নোট / বিবরণ</label>
-                <input
-                  type="text"
-                  value={payNote}
-                  onChange={(e) => setPayNote(e.target.value)}
-                  placeholder="যেমন: নভেম্বর মাসের সম্পূর্ণ বেতন"
-                  style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1' }}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' }}>
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', backdropFilter: 'blur(3px)' }}>
+            <div style={{ background: '#fff', width: '100%', maxWidth: '780px', maxHeight: '92vh', overflowY: 'auto', borderRadius: '16px', padding: '24px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.3)' }}>
+              
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
+                <div>
+                  <h3 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 4px', color: '#0f172a' }}>
+                    💵 কর্মকর্তা/কর্মচারীর বেতন পরিশোধ ভাউচার (Salary Disbursement)
+                  </h3>
+                  <div style={{ fontSize: '13px', color: '#64748b' }}>
+                    কর্মী: <strong style={{ color: '#0f172a' }}>{payingStaff.name}</strong> ({payingStaff.role}) | বেতন মাস: <strong style={{ color: '#2563eb' }}>{selectedMonth}</strong>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setIsPayModalOpen(false)}
-                  style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                  style={{ background: '#f1f5f9', border: 'none', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748b' }}
                 >
-                  বাতিল
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', background: '#059669', color: '#fff', fontWeight: '700' }}
-                >
-                  {loading ? 'প্রদান হচ্ছে...' : 'বেতন নিশ্চিত করুন'}
+                  ✕
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleDisburseSalary}>
+                {/* 2 Column Grid for Earnings & Deductions */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', marginBottom: '18px' }}>
+                  
+                  {/* Column 1: Earnings & Allowances */}
+                  <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '16px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: '800', margin: '0 0 12px', color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      💰 উপার্জন ও ভাতাসমূহ (Earnings & Allowances)
+                    </h4>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '3px', color: '#166534' }}>
+                          ১. মূল বেতন (Basic Salary) *
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          value={basicSalary}
+                          onChange={(e) => setBasicSalary(e.target.value)}
+                          placeholder="0"
+                          style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #86efac', background: '#fff', fontSize: '13px', fontWeight: '700' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ২. বাড়িভাড়া ভাতা
+                          </label>
+                          <input
+                            type="number"
+                            value={houseRent}
+                            onChange={(e) => setHouseRent(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ৩. মেডিকেল ভাতা
+                          </label>
+                          <input
+                            type="number"
+                            value={medical}
+                            onChange={(e) => setMedical(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ৪. যাতায়াত ভাতা
+                          </label>
+                          <input
+                            type="number"
+                            value={conveyance}
+                            onChange={(e) => setConveyance(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ৫. উৎসব / বোনাস
+                          </label>
+                          <input
+                            type="number"
+                            value={bonus}
+                            onChange={(e) => setBonus(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ৬. ইনসেন্টিভ / কমিশন
+                          </label>
+                          <input
+                            type="number"
+                            value={incentive}
+                            onChange={(e) => setIncentive(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ৭. অন্যান্য ভাতা
+                          </label>
+                          <input
+                            type="number"
+                            value={otherAllowance}
+                            onChange={(e) => setOtherAllowance(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#dcfce7', padding: '8px 12px', borderRadius: '6px', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#166534' }}>মোট উপার্জন (Gross Earnings):</span>
+                        <strong style={{ fontSize: '14px', color: '#15803d' }}>{formatCurrency(grossEarnings)}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Column 2: Deductions */}
+                  <div style={{ background: '#fff5f5', border: '1px solid #fecaca', borderRadius: '12px', padding: '16px' }}>
+                    <h4 style={{ fontSize: '14px', fontWeight: '800', margin: '0 0 12px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ✂️ কর্তনসমূহ (Deductions)
+                    </h4>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '3px', color: '#991b1b' }}>
+                          ১. অগ্রিম বেতন সমন্বয় (Advance Deduction)
+                        </label>
+                        <input
+                          type="number"
+                          value={advanceDeduction}
+                          onChange={(e) => setAdvanceDeduction(e.target.value)}
+                          placeholder="0"
+                          style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #fca5a5', background: '#fff', fontSize: '13px', fontWeight: '700', color: '#dc2626' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ২. ইনকাম ট্যাক্স কর্তন
+                          </label>
+                          <input
+                            type="number"
+                            value={taxDeduction}
+                            onChange={(e) => setTaxDeduction(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            ৩. অন্যান্য কর্তন
+                          </label>
+                          <input
+                            type="number"
+                            value={otherDeduction}
+                            onChange={(e) => setOtherDeduction(e.target.value)}
+                            placeholder="0"
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                          অন্যান্য কর্তনের মন্তব্য / কারণ
+                        </label>
+                        <input
+                          type="text"
+                          value={otherDeductionReason}
+                          onChange={(e) => setOtherDeductionReason(e.target.value)}
+                          placeholder="যেমন: বিলম্বে উপস্থিতি জরিমানা বা ক্ষতিপূরণ"
+                          style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '3px', color: '#334155' }}>
+                            পেমেন্ট মাধ্যম
+                          </label>
+                          <select
+                            value={payMethod}
+                            onChange={(e) => setPayMethod(e.target.value)}
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          >
+                            <option value="Cash">ক্যাশ (Cash Drawer)</option>
+                            <option value="bKash">বিকাশ (bKash)</option>
+                            <option value="Bank">ব্যাংক একাউন্ট</option>
+                            <option value="Nagad">নগদ (Nagad)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '3px', color: '#334155' }}>
+                            পেমেন্ট নোট
+                          </label>
+                          <input
+                            type="text"
+                            value={payNote}
+                            onChange={(e) => setPayNote(e.target.value)}
+                            placeholder="নোট..."
+                            style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', fontSize: '13px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ background: '#fee2e2', padding: '8px 12px', borderRadius: '6px', marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#991b1b' }}>মোট কর্তন (Total Deductions):</span>
+                        <strong style={{ fontSize: '14px', color: '#dc2626' }}>- {formatCurrency(totalDeductions)}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Final Net Summary Banner */}
+                <div style={{
+                  background: '#eff6ff',
+                  border: '2px solid #2563eb',
+                  borderRadius: '12px',
+                  padding: '14px 18px',
+                  marginBottom: '18px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#1e40af' }}>সর্বমোট প্রদেয় নিট বেতন (Net Payable):</span>
+                    <div style={{ fontSize: '24px', fontWeight: '900', color: '#1d4ed8' }}>
+                      {formatCurrency(netPayable)}
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#3b82f6', fontWeight: '600', marginTop: '2px' }}>
+                      কথায়: {numberToBengaliWords(netPayable)}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsPayModalOpen(false)}
+                      disabled={loading}
+                      style={{ padding: '9px 18px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontWeight: '600', cursor: 'pointer' }}
+                    >
+                      বাতিল
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      style={{
+                        padding: '9px 24px',
+                        borderRadius: '6px',
+                        border: 'none',
+                        background: '#16a34a',
+                        color: '#fff',
+                        fontWeight: '800',
+                        fontSize: '14px',
+                        cursor: loading ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 4px 6px -1px rgba(22,163,74,0.3)'
+                      }}
+                    >
+                      {loading ? 'প্রসেস হচ্ছে...' : 'বেতন পরিশোধ নিশ্চিত করুন'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* =========================================================================
           MODAL 3: Advance Salary Modal

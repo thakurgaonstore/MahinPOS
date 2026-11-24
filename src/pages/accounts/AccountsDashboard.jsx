@@ -114,6 +114,9 @@ const AccountsDashboard = () => {
   });
 
   const liveExpenses = filteredExpenses.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+  const payrollExpenseTotal = filteredExpenses
+    .filter((e) => e.category === 'স্টাফ বেতন ও বোনাস' || (e.title && e.title.includes('স্টাফ বেতন')))
+    .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
 
   // Merge permanent archived yearly summaries if applicable ('all' or 'year')
   let archivedGross = 0;
@@ -337,7 +340,9 @@ const AccountsDashboard = () => {
             <div style={{ background: '#fef2f2', padding: '6px', borderRadius: '6px', color: '#ef4444' }}><MdTrendingDown size={18} /></div>
           </div>
           <div style={{ fontSize: '22px', fontWeight: '800', color: '#dc2626' }}>{formatCurrency(totalExpenses)}</div>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>ভাড়া, বিদ্যুৎ ও দৈনন্দিন খরচ</span>
+          <span style={{ fontSize: '11px', color: '#64748b' }}>
+            ভাড়া, বিদ্যুৎ ও দৈনন্দিন খরচ {payrollExpenseTotal > 0 && <span style={{ color: '#4f46e5', fontWeight: '700' }}>(পে-রোল: {formatCurrency(payrollExpenseTotal)})</span>}
+          </span>
         </div>
 
         {/* 6. Net Profit */}
