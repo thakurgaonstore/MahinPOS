@@ -27,6 +27,7 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
   if (!invoice) return null;
 
   const shopName = shopConfig?.shopName || shopConfig?.name || 'Mahin POS Store';
+  const shopLogo = shopConfig?.logoUrl || invoice?.shopLogo || invoice?.logoUrl || '';
   const shopPhone = shopConfig?.phone || '01700-000000';
   const shopAddress = shopConfig?.address || 'বাংলাদেশ';
   const binVat = shopConfig?.binVat || '';
@@ -283,6 +284,13 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
             {format === 'pos' && (
               <div style={{ fontSize: '13px', lineHeight: '1.4' }}>
                 <div style={{ textAlign: 'center', marginBottom: '12px' }}>
+                  {shopLogo && (
+                    <img
+                      src={shopLogo}
+                      alt="Shop Logo"
+                      style={{ maxHeight: '55px', maxWidth: '140px', objectFit: 'contain', margin: '0 auto 6px auto', display: 'block' }}
+                    />
+                  )}
                   <h2 style={{ fontSize: '18px', fontWeight: '800', margin: '0 0 2px' }}>{shopName}</h2>
                   <p style={{ fontSize: '12px', color: '#333', margin: '0 0 2px' }}>{slogan}</p>
                   <p style={{ fontSize: '11px', color: '#555', margin: '0 0 2px' }}>{shopAddress}</p>
@@ -420,6 +428,13 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
               <div style={{ fontSize: '14px', lineHeight: '1.5' }}>
                 {/* Header */}
                 <div style={{ textAlign: 'center', borderBottom: '2px double #0f172a', paddingBottom: '12px', marginBottom: '14px' }}>
+                  {shopLogo && (
+                    <img
+                      src={shopLogo}
+                      alt="Shop Logo"
+                      style={{ maxHeight: '60px', maxWidth: '160px', objectFit: 'contain', margin: '0 auto 6px auto', display: 'block' }}
+                    />
+                  )}
                   <div style={{ display: 'inline-block', border: '1px solid #0f172a', padding: '2px 14px', borderRadius: '14px', fontSize: '12px', fontWeight: '700', marginBottom: '4px' }}>
                     ক্যাশ মেমো (CASH MEMO)
                   </div>
@@ -551,12 +566,21 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat }) => {
               <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
                 {/* Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #2563eb', paddingBottom: '18px', marginBottom: '20px' }}>
-                  <div>
-                    <h1 style={{ fontSize: '26px', fontWeight: '800', color: '#1e3a8a', margin: '0 0 4px' }}>{shopName}</h1>
-                    <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 4px' }}>{slogan}</p>
-                    <p style={{ fontSize: '13px', margin: '0 0 2px' }}>{shopAddress}</p>
-                    <p style={{ fontSize: '13px', margin: '0 0 2px' }}>ফোন: {shopPhone}</p>
-                    {binVat && <p style={{ fontSize: '13px', fontWeight: '600', color: '#2563eb', margin: '0' }}>BIN / VAT Reg: {binVat}</p>}
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                    {shopLogo && (
+                      <img
+                        src={shopLogo}
+                        alt="Shop Logo"
+                        style={{ maxHeight: '75px', maxWidth: '130px', objectFit: 'contain', borderRadius: '6px' }}
+                      />
+                    )}
+                    <div>
+                      <h1 style={{ fontSize: '26px', fontWeight: '800', color: '#1e3a8a', margin: '0 0 4px' }}>{shopName}</h1>
+                      <p style={{ fontSize: '13px', color: '#64748b', margin: '0 0 4px' }}>{slogan}</p>
+                      <p style={{ fontSize: '13px', margin: '0 0 2px' }}>{shopAddress}</p>
+                      <p style={{ fontSize: '13px', margin: '0 0 2px' }}>ফোন: {shopPhone}</p>
+                      {binVat && <p style={{ fontSize: '13px', fontWeight: '600', color: '#2563eb', margin: '0' }}>BIN / VAT Reg: {binVat}</p>}
+                    </div>
                   </div>
 
                   <div style={{ textAlign: 'right' }}>

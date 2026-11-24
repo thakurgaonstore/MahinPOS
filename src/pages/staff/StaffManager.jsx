@@ -9,13 +9,15 @@ import {
   serverTimestamp,
   query,
   where,
-  getDocs
+  getDocs,
+  getDoc
 } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { hashPassword } from '../../utils/cryptoHelper';
 import { toast } from 'react-hot-toast';
+import PayrollSlipModal from './PayrollSlipModal';
 
 import {
   MdPersonAdd,
@@ -86,6 +88,17 @@ const StaffManager = () => {
   const [advanceAmount, setAdvanceAmount] = useState('');
   const [advanceMethod, setAdvanceMethod] = useState('Cash');
   const [advanceNote, setAdvanceNote] = useState('');
+
+  // Payroll Slip Modal State & Shop Config
+  const [shopConfig, setShopConfig] = useState(null);
+  const [viewingSlipRecord, setViewingSlipRecord] = useState(null);
+
+  useEffect(() => {
+    if (!shopId) return;
+    getDoc(doc(db, 'shops', shopId)).then((snap) => {
+      if (snap.exists()) setShopConfig(snap.data());
+    }).catch(() => {});
+  }, [shopId]);
 
   // 1. Realtime Staff List
   useEffect(() => {
@@ -290,6 +303,25 @@ const StaffManager = () => {
 
       toast.success(`সফল! "${payingStaff.name}" কে ${formatCurrency(finalPaid)} বেতন প্রদান সম্পন্ন এবং খরচে যুক্ত হয়েছে।`);
       setIsPayModalOpen(false);
+
+      // Open printable payroll slip
+      setViewingSlipRecord({
+        id: payrollRef.id,
+        staffId: payingStaff.id,
+        staffName: payingStaff.name,
+        role: payingStaff.role,
+        staff: payingStaff,
+        month: selectedMonth,
+        baseSalary: Number(payingStaff.baseSalary) || 0,
+        bonus: Number(bonusAmount) || 0,
+        deduction: Number(deductionAmount) || 0,
+        paidAmount: finalPaid,
+        paymentMethod: payMethod,
+        note: payNote.trim(),
+        paymentDate: new Date().toISOString().slice(0, 10),
+        status: 'Paid'
+      });
+
       setPayingStaff(null);
     } catch (err) {
       console.error(err);
@@ -832,7 +864,26 @@ const StaffManager = () => {
                       </td>
                       <td style={{ padding: '12px 10px', textAlign: 'center' }}>
                         {isPaid ? (
-                          <span style={{ fontSize: '12px', color: '#059669', fontWeight: '700' }}>✓ সম্পন্ন</span>
+                          <button
+                            type="button"
+                            onClick={() => setViewingSlipRecord({ ...payrollPaid, staff: s })}
+                            style={{
+                              padding: '6px 14px',
+                              borderRadius: '6px',
+                              border: '1px solid #2563eb',
+                              background: '#eff6ff',
+                              color: '#2563eb',
+                              fontWeight: '700',
+                              fontSize: '12px',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              boxShadow: '0 1px 3px rgba(37,99,235,0.1)'
+                            }}
+                          >
+                            <MdReceipt size={15} /> পে-রোল স্লিপ
+                          </button>
                         ) : (
                           <button
                             onClick={() => openPaySalaryModal(s)}
@@ -1115,6 +1166,16 @@ const StaffManager = () => {
             </form>
           </div>
         </div>
+      )}
+      {/* =========================================================
+          MODAL 4: Payroll Pay Slip Modal
+      ========================================================= */}
+      {viewingSlipRecord && (
+        <PayrollSlipModal
+          record={viewingSlipRecord}
+          shopConfig={shopConfig}
+          onClose={() => setViewingSlipRecord(null)}
+        />
       )}
     </div>
   );

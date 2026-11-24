@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, Link } from 'react-router-dom';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import styles from './DashboardLayout.module.css';
 import { useAuth } from '../context/AuthContext';
@@ -34,12 +34,25 @@ const DashboardLayout = () => {
   const { logout, currentUser, userProfile, stopImpersonation } = useAuth();
 
   const [shopName, setShopName] = useState(userProfile?.shopName || "Mahin POS Store");
+  const [shopLogo, setShopLogo] = useState(userProfile?.logoUrl || "");
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
 
   const shopId = userProfile?.shopId || 'main-shop';
   const role = userProfile?.role || 'cashier';
+
+  // Load shop profile logo and title
+  useEffect(() => {
+    if (!shopId) return;
+    getDoc(doc(db, 'shops', shopId)).then((snap) => {
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.shopName || d.name) setShopName(d.shopName || d.name);
+        if (d.logoUrl) setShopLogo(d.logoUrl);
+      }
+    }).catch(() => {});
+  }, [shopId]);
 
   const isSuperAdminUser = 
     userProfile?.isImpersonating || 
@@ -131,7 +144,11 @@ const DashboardLayout = () => {
       <aside className={`${styles.sidebar} ${isMobileOpen ? styles.open : ''}`}>
         <div className={styles.sidebarHeader}>
           <Link to="/dashboard" className={styles.brand}>
-            <div className={styles.brandLogo}>POS</div>
+            {shopLogo ? (
+              <img src={shopLogo} alt="Logo" style={{ width: '38px', height: '38px', objectFit: 'contain', borderRadius: '8px', background: '#ffffff', padding: '2px', flexShrink: 0 }} />
+            ) : (
+              <div className={styles.brandLogo}>POS</div>
+            )}
             <div className={styles.brandText}>
               <span className={styles.brandTitle}>{shopName}</span>
               <span className={styles.brandSubtitle}>স্মার্ট শপ ম্যানেজমেন্ট</span>

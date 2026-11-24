@@ -22,7 +22,9 @@ import {
   MdRestore,
   MdCheckCircle,
   MdWarning,
-  MdDeleteSweep
+  MdDeleteSweep,
+  MdImage,
+  MdDelete
 } from 'react-icons/md';
 import DataArchiveModal from './DataArchiveModal';
 
@@ -31,6 +33,7 @@ const ShopSettings = () => {
   const shopId = userProfile?.shopId || 'main-shop';
 
   const [shopName, setShopName] = useState('');
+  const [logoUrl, setLogoUrl] = useState('');
   const [slogan, setSlogan] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -67,6 +70,7 @@ const ShopSettings = () => {
         if (snap.exists()) {
           const d = snap.data();
           setShopName(d.shopName || d.name || '');
+          setLogoUrl(d.logoUrl || '');
           setSlogan(d.slogan || '');
           setPhone(d.phone || '');
           setAddress(d.address || '');
@@ -99,6 +103,7 @@ const ShopSettings = () => {
       await setDoc(doc(db, 'shops', shopId), {
         shopName: shopName.trim(),
         name: shopName.trim(),
+        logoUrl: logoUrl.trim(),
         slogan: slogan.trim(),
         phone: phone.trim(),
         address: address.trim(),
@@ -121,6 +126,22 @@ const ShopSettings = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle Logo Upload (Converts to Base64 image URL)
+  const handleLogoFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('লোগোর ফাইলের আকার সর্বোচ্চ ২ মেগাবাইট হতে পারে');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setLogoUrl(ev.target.result);
+      toast.success('লোগো সিলেক্ট হয়েছে! সংরক্ষণ বাটনে চাপুন।');
+    };
+    reader.readAsDataURL(file);
   };
 
   // Download JSON Backup
@@ -200,8 +221,82 @@ const ShopSettings = () => {
         {/* Basic Shop Info */}
         <div style={{ background: '#fff', padding: '24px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
           <h3 style={{ fontSize: '16px', fontWeight: '800', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <MdStorefront color="#2563eb" size={20} /> দোকানের সাধারণ তথ্য
+            <MdStorefront color="#2563eb" size={20} /> দোকানের সাধারণ তথ্য ও অফিশিয়াল লোগো
           </h3>
+
+          {/* Shop Logo Section */}
+          <div style={{ marginBottom: '20px', padding: '16px', background: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+            <div style={{
+              width: '90px',
+              height: '90px',
+              borderRadius: '12px',
+              border: '2px dashed #cbd5e1',
+              background: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+              flexShrink: 0
+            }}>
+              {logoUrl ? (
+                <img src={logoUrl} alt="Shop Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              ) : (
+                <div style={{ textAlign: 'center', color: '#94a3b8' }}>
+                  <MdImage size={34} />
+                  <span style={{ fontSize: '11px', display: 'block', fontWeight: '600' }}>লোগো নেই</span>
+                </div>
+              )}
+            </div>
+
+            <div style={{ flex: 1, minWidth: '240px' }}>
+              <label style={{ display: 'block', fontSize: '14px', fontWeight: '700', marginBottom: '4px', color: '#0f172a' }}>
+                দোকানের অফিশিয়াল লোগো (Shop Logo)
+              </label>
+              <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 10px 0', lineHeight: '1.5' }}>
+                এই লোগোটি আপনার বিক্রয় রশিদ (থার্মাল POS, ক্যাশ মেমো, A4 চালান) এবং কর্মচারী পে-রোল স্লিপে স্বয়ংক্রিয়ভাবে প্রিন্ট হবে।
+              </p>
+
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <label style={{
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  background: '#2563eb',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <MdCloudUpload size={16} /> লোগো ছবি আপলোড করুন
+                  <input type="file" accept="image/*" onChange={handleLogoFileChange} style={{ display: 'none' }} />
+                </label>
+
+                {logoUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setLogoUrl('')}
+                    style={{
+                      padding: '8px 14px',
+                      borderRadius: '6px',
+                      background: '#fee2e2',
+                      color: '#dc2626',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <MdDelete size={16} /> লোগো মুছুন
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '16px', marginBottom: '16px' }}>
             <div>

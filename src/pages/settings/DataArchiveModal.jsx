@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 import { archiveAndPurgeSales } from '../../utils/dataArchiveManager';
 import { toast } from 'react-hot-toast';
 import {
@@ -15,16 +17,76 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
   const currentYear = new Date().getFullYear();
   const [archiveMode, setArchiveMode] = useState('year'); // 'year' | 'one_year_old' | 'custom_date'
   const [selectedYear, setSelectedYear] = useState(String(currentYear - 1));
+  const [isCustomYearInput, setIsCustomYearInput] = useState(false);
+  const [customYearValue, setCustomYearValue] = useState('');
   const [customCutoffDate, setCustomCutoffDate] = useState('');
   const [confirmText, setConfirmText] = useState('');
   const [loading, setLoading] = useState(false);
   const [progressMsg, setProgressMsg] = useState('');
+
+  // Dynamically detected years from Firestore
+  const [detectedYearsMap, setDetectedYearsMap] = useState({});
+  const [loadingDetectedYears, setLoadingDetectedYears] = useState(true);
+
+  useEffect(() => {
+    if (!shopId) return;
+    const fetchExistingYears = async () => {
+      try {
+        setLoadingDetectedYears(true);
+        const snap = await getDocs(collection(db, 'shops', shopId, 'sales'));
+        const counts = {};
+        snap.forEach((docItem) => {
+          const d = docItem.data();
+          const dateObj = d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt);
+          if (!isNaN(dateObj.getTime())) {
+            const yr = String(dateObj.getFullYear());
+            counts[yr] = (counts[yr] || 0) + 1;
+          }
+        });
+        setDetectedYearsMap(counts);
+
+        // If detected years exist and previous year isn't present, default to earliest detected year or current - 1
+        const detectedKeys = Object.keys(counts).sort((a, b) => Number(b) - Number(a));
+        if (detectedKeys.length > 0 && !counts[String(currentYear - 1)]) {
+          setSelectedYear(detectedKeys[0]);
+        }
+      } catch (err) {
+        console.warn("Could not scan sales years:", err);
+      } finally {
+        setLoadingDetectedYears(false);
+      }
+    };
+    fetchExistingYears();
+  }, [shopId, currentYear]);
+
+  // Build a rich, dynamic list of years spanning future (up to currentYear + 10) and past down to 2020
+  const dynamicYearsRange = [];
+  const startYr = currentYear + 10; // e.g. 2036
+  const endYr = 2020;
+  for (let y = startYr; y >= endYr; y--) {
+    dynamicYearsRange.push(String(y));
+  }
+  // Ensure any detected year from database is included
+  Object.keys(detectedYearsMap).forEach((dy) => {
+    if (!dynamicYearsRange.includes(dy)) {
+      dynamicYearsRange.push(dy);
+    }
+  });
+  dynamicYearsRange.sort((a, b) => Number(b) - Number(a));
+
+  const resolvedTargetYear = isCustomYearInput ? customYearValue.trim() : selectedYear;
+  const currentSelectedCount = detectedYearsMap[resolvedTargetYear] || 0;
 
   const handleStartPurge = async (e) => {
     e.preventDefault();
 
     if (confirmText.trim().toUpperCase() !== 'ARCHIVE') {
       toast.error('নিশ্চিত করতে ইনপুট বক্সে সঠিকভাবে "ARCHIVE" লিখুন');
+      return;
+    }
+
+    if (archiveMode === 'year' && isCustomYearInput && (!customYearValue || isNaN(Number(customYearValue)))) {
+      toast.error('অনুগ্রহ করে সঠিক সাল লিখুন (যেমন: ২০৩০ বা ২০৩৫)');
       return;
     }
 
@@ -36,7 +98,7 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
       let cutoffDate = null;
 
       if (archiveMode === 'year') {
-        targetYear = selectedYear;
+        targetYear = resolvedTargetYear;
       } else if (archiveMode === 'one_year_old') {
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
@@ -181,20 +243,87 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
 
           {/* Dynamic Input based on Mode */}
           {archiveMode === 'year' && (
-            <div style={{ marginBottom: '16px', background: '#f8fafc', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>
-                যে বছরের ইনভয়েস ডিলিট করতে চান:
-              </label>
-              <select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                disabled={loading}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '14px', fontWeight: '700' }}
-              >
-                {[currentYear - 1, currentYear - 2, currentYear - 3, currentYear].map((y) => (
-                  <option key={y} value={y}>{y} সাল (Year {y})</option>
-                ))}
-              </select>
+            <div style={{ marginBottom: '16px', background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>
+                  যে বছরের ইনভয়েস ডিলিট ও আর্কাইভ করতে চান:
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsCustomYearInput(!isCustomYearInput)}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    color: '#2563eb',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  {isCustomYearInput ? '← তালিকা থেকে বেছে নিন' : 'অন্য সাল লিখুন (যেমন ২০৩০, ২০৩৫)'}
+                </button>
+              </div>
+
+              {!isCustomYearInput ? (
+                <>
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    disabled={loading}
+                    style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #94a3b8', fontSize: '14px', fontWeight: '700', background: '#fff' }}
+                  >
+                    {/* Detected Years First */}
+                    {Object.keys(detectedYearsMap).length > 0 && (
+                      <optgroup label="📋 ডেটাবেসে পাওয়া গেছে (Detected in Database)">
+                        {Object.keys(detectedYearsMap).sort((a, b) => Number(b) - Number(a)).map((yr) => (
+                          <option key={`detected-${yr}`} value={yr}>
+                            {yr} সাল ({detectedYearsMap[yr]} টি ইনভয়েস বিদ্যমান)
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+
+                    {/* All dynamic years */}
+                    <optgroup label="📅 সকল সাল (Dynamic Range 2036 - 2020)">
+                      {dynamicYearsRange.map((yr) => (
+                        <option key={`range-${yr}`} value={yr}>
+                          {yr} সাল {detectedYearsMap[yr] ? `(${detectedYearsMap[yr]} টি ইনভয়েস)` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </>
+              ) : (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <input
+                    type="number"
+                    min="2000"
+                    max="2099"
+                    placeholder="সাল লিখুন (যেমন: 2030 বা 2035)"
+                    value={customYearValue}
+                    onChange={(e) => setCustomYearValue(e.target.value)}
+                    disabled={loading}
+                    style={{ flex: 1, padding: '9px 12px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '14px', fontWeight: '700' }}
+                  />
+                  <span style={{ fontSize: '13px', fontWeight: '700', color: '#64748b' }}>সাল</span>
+                </div>
+              )}
+
+              {/* Real-time Document Count Feedback */}
+              <div style={{ marginTop: '8px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                {loadingDetectedYears ? (
+                  <span style={{ color: '#64748b' }}>ফায়ারবেস থেকে ইনভয়েসের সাল স্ক্যান হচ্ছে...</span>
+                ) : currentSelectedCount > 0 ? (
+                  <span style={{ color: '#059669', fontWeight: '700', background: '#ecfdf5', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                    ✓ নির্বাচিত {resolvedTargetYear} সালে মোট {currentSelectedCount} টি ইনভয়েস পাওয়া গেছে যা আর্কাইভ করা হবে।
+                  </span>
+                ) : (
+                  <span style={{ color: '#64748b', background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px' }}>
+                    ℹ️ নির্বাচিত {resolvedTargetYear} সালে বর্তমানে ফায়ারবেসে কোনো ইনভয়েস পাওয়া যায়নি।
+                  </span>
+                )}
+              </div>
             </div>
           )}
 
