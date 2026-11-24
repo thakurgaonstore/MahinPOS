@@ -53,6 +53,8 @@ const POSTerminal = () => {
   // Cart state
   const [cart, setCart] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const [discountType, setDiscountType] = useState('flat'); // 'flat' | 'percent'
   const [discountVal, setDiscountVal] = useState(0);
   const [taxPercent, setTaxPercent] = useState(0);
@@ -186,7 +188,17 @@ const POSTerminal = () => {
     const nameMatch = (p.name || '').toLowerCase().includes(q) || (p.nameBn || '').includes(q);
     const barcodeMatch = (p.barcode || '').toLowerCase().includes(q);
     const skuMatch = (p.sku || '').toLowerCase().includes(q);
-    return nameMatch || barcodeMatch || skuMatch;
+    const catMatch = (p.category || '').toLowerCase().includes(q);
+    return nameMatch || barcodeMatch || skuMatch || catMatch;
+  });
+
+  // Filtered customers by mobile number or name
+  const filteredCustomers = customers.filter((c) => {
+    if (!customerSearchQuery.trim()) return true;
+    const q = customerSearchQuery.trim().toLowerCase();
+    const phoneMatch = (c.phone || '').includes(q);
+    const nameMatch = (c.name || '').toLowerCase().includes(q);
+    return phoneMatch || nameMatch;
   });
 
   // Add to cart
@@ -248,9 +260,11 @@ const POSTerminal = () => {
     setCart(newCart);
   };
 
-  // Set fractional or custom quantity (e.g. 0.25 kg)
+  // Set fractional or custom quantity (e.g. 0.150 kg, .220 ltr)
   const setCustomQty = (index, qty) => {
-    const val = parseFloat(qty);
+    if (qty === '' || qty === null || qty === undefined) return;
+    const strVal = String(qty).trim();
+    const val = parseFloat(strVal.startsWith('.') ? '0' + strVal : strVal);
     if (isNaN(val) || val <= 0) return;
     const item = cart[index];
     if (val > item.stock) {
@@ -352,9 +366,21 @@ const POSTerminal = () => {
     setIsSubmitting(true);
 
     try {
-      const invoiceNo = `INV-${Date.now().toString().slice(-6)}`;
+      // Invoice ID in YYMMDDHHMMSS format (e.g. 261124131545)
+      const now = new Date();
+      const yy = String(now.getFullYear()).slice(-2);
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const hh = String(now.getHours()).padStart(2, '0');
+      const min = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+      const invoiceNo = `${yy}${mm}${dd}${hh}${min}${ss}`;
+
       const actualPaid = paymentMethod === 'Due' ? 0 : numericPaid;
       const actualDue = paymentMethod === 'Due' ? grandTotal : dueAmount;
+
+      const customerPrevPoints = selectedCustomer ? (Number(selectedCustomer.rewardPoints) || 0) : 0;
+      const finalCustomerPoints = selectedCustomer ? Math.max(0, customerPrevPoints + pointsEarned - pointsToRedeem) : 0;
 
       const saleData = {
         invoiceNo,
@@ -364,6 +390,8 @@ const POSTerminal = () => {
         discountAmount: calculatedDiscount,
         pointsRedeemed: pointsToRedeem,
         pointsRedeemedDiscount: pointsDiscount,
+        customerRewardPoints: customerPrevPoints,
+        finalCustomerPoints: finalCustomerPoints,
         taxAmount,
         grandTotal,
         paymentMethod,
@@ -650,101 +678,248 @@ const POSTerminal = () => {
         overflow: 'hidden'
       }}>
         {/* Customer Select Bar */}
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <div style={{ position: 'relative', flex: 1 }}>
-              <select
-                value={selectedCustomer?.id || ''}
-                onChange={(e) => {
-                  const cust = customers.find((c) => c.id === e.target.value);
-                  setSelectedCustomer(cust || null);
-                  setPointsToRedeem(0);
-                }}
-                style={{
-                  width: '100%',
-                  padding: '8px 12px',
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', position: 'relative' }}>
+          {!selectedCustomer ? (
+            <div>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <MdSearch size={18} style={{ position: 'absolute', left: '10px', top: '9px', color: '#94a3b8' }} />
+                  <input
+                    type="text"
+                    placeholder="📱 কাস্টমার মোবাইল নম্বর বা নাম লিখুন..."
+                    value={customerSearchQuery}
+                    onFocus={() => setIsCustomerDropdownOpen(true)}
+                    onChange={(e) => {
+                      setCustomerSearchQuery(e.target.value);
+                      setIsCustomerDropdownOpen(true);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '8px 28px 8px 32px',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      fontSize: '13px',
+                      outline: 'none'
+                    }}
+                  />
+                  {customerSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomerSearchQuery('')}
+                      style={{ position: 'absolute', right: '8px', top: '8px', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                    >
+                      <MdClear size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => setIsCustomerModalOpen(true)}
+                  title="নতুন কাস্টমার যোগ করুন"
+                  style={{
+                    background: '#2563eb',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <MdPersonAdd size={16} />
+                  + কাস্টমার
+                </button>
+              </div>
+
+              {/* Autocomplete Dropdown */}
+              {isCustomerDropdownOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: '52px',
+                  left: '16px',
+                  right: '16px',
+                  background: '#ffffff',
                   borderRadius: '8px',
                   border: '1px solid #cbd5e1',
-                  background: '#ffffff',
-                  fontSize: '13px',
-                  outline: 'none'
-                }}
-              >
-                <option value="">সাধারণ নগদ ক্রেতা (Walk-in Customer)</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} - {c.phone} (পয়েন্ট: {c.rewardPoints || 0})
-                  </option>
-                ))}
-              </select>
+                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.15)',
+                  zIndex: 30,
+                  maxHeight: '220px',
+                  overflowY: 'auto'
+                }}>
+                  <div
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setIsCustomerDropdownOpen(false);
+                      setCustomerSearchQuery('');
+                      setPointsToRedeem(0);
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      borderBottom: '1px solid #f1f5f9',
+                      color: '#64748b'
+                    }}
+                  >
+                    🚶 সাধারণ নগদ ক্রেতা (Walk-in Customer)
+                  </div>
+
+                  {filteredCustomers.slice(0, 8).map((c) => (
+                    <div
+                      key={c.id}
+                      onClick={() => {
+                        setSelectedCustomer(c);
+                        setIsCustomerDropdownOpen(false);
+                        setCustomerSearchQuery('');
+                        setPointsToRedeem(0);
+                      }}
+                      style={{
+                        padding: '8px 12px',
+                        fontSize: '13px',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #f1f5f9',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: '700', color: '#0f172a' }}>{c.name}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>📱 {c.phone}</div>
+                      </div>
+                      <span style={{ fontSize: '11px', fontWeight: '700', background: '#eff6ff', color: '#2563eb', padding: '2px 6px', borderRadius: '4px' }}>
+                        🎁 {c.rewardPoints || 0} pt
+                      </span>
+                    </div>
+                  ))}
+
+                  {filteredCustomers.length === 0 && customerSearchQuery && (
+                    <div style={{ padding: '10px 12px', textAlign: 'center' }}>
+                      <p style={{ margin: '0 0 6px 0', fontSize: '12px', color: '#64748b' }}>এই নম্বরে কোনো কাস্টমার পাওয়া যায়নি</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomerModalOpen(true);
+                          setIsCustomerDropdownOpen(false);
+                        }}
+                        style={{
+                          background: '#10b981',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '4px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + "{customerSearchQuery}" নম্বর দিয়ে নতুন কাস্টমার তৈরি করুন
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-
-            <button
-              onClick={() => setIsCustomerModalOpen(true)}
-              title="নতুন কাস্টমার যোগ করুন"
-              style={{
-                background: '#2563eb',
-                color: '#fff',
-                border: 'none',
-                padding: '8px 12px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                fontSize: '12px',
-                fontWeight: '600',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              <MdPersonAdd size={16} />
-              + কাস্টমার
-            </button>
-          </div>
-
-          {/* Customer Loyalty Points Card */}
-          {selectedCustomer && (
+          ) : (
+            /* Selected Customer Card with Loyalty Points & Redeem */
             <div style={{
-              marginTop: '10px',
-              padding: '8px 12px',
               background: '#eff6ff',
               border: '1px solid #bfdbfe',
               borderRadius: '8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              fontSize: '12px'
+              padding: '10px 12px'
             }}>
-              <div>
-                <span style={{ color: '#1e40af', fontWeight: '700' }}>🎁 রিওয়ার্ড পয়েন্টস: </span>
-                <span style={{ fontWeight: '800', color: '#2563eb' }}>{selectedCustomer.rewardPoints || 0} পয়েন্ট</span>
-                <span style={{ color: '#64748b' }}> (মান: ৳{selectedCustomer.rewardPoints || 0})</span>
-              </div>
-
-              {(selectedCustomer.rewardPoints || 0) > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div>
+                  <div style={{ fontWeight: '700', fontSize: '14px', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <MdPerson size={16} /> {selectedCustomer.name}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                    📱 {selectedCustomer.phone}
+                  </div>
+                </div>
                 <button
+                  type="button"
                   onClick={() => {
-                    if (pointsToRedeem > 0) {
-                      setPointsToRedeem(0);
-                    } else {
-                      const maxRedeem = Math.min(selectedCustomer.rewardPoints || 0, subtotal);
-                      setPointsToRedeem(maxRedeem);
-                      toast.success(`${maxRedeem} পয়েন্ট রিডিম করা হয়েছে!`);
-                    }
+                    setSelectedCustomer(null);
+                    setPointsToRedeem(0);
                   }}
                   style={{
-                    background: pointsToRedeem > 0 ? '#ef4444' : '#10b981',
-                    color: '#ffffff',
-                    border: 'none',
-                    padding: '3px 10px',
+                    background: '#fff',
+                    border: '1px solid #cbd5e1',
                     borderRadius: '4px',
-                    fontWeight: '700',
+                    padding: '3px 8px',
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#dc2626',
                     cursor: 'pointer'
                   }}
                 >
-                  {pointsToRedeem > 0 ? 'বাতিল' : 'পয়েন্ট ব্যবহার করুন'}
+                  ❌ পরিবর্তন
                 </button>
-              )}
+              </div>
+
+              {/* Loyalty Points Redeem Control */}
+              <div style={{
+                borderTop: '1px dashed #bfdbfe',
+                paddingTop: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                fontSize: '12px'
+              }}>
+                <div>
+                  <span style={{ color: '#1e40af', fontWeight: '700' }}>🎁 পয়েন্ট ব্যালান্স: </span>
+                  <span style={{ fontWeight: '800', color: '#2563eb' }}>{selectedCustomer.rewardPoints || 0} টি</span>
+                  <span style={{ color: '#64748b' }}> (মান: ৳{selectedCustomer.rewardPoints || 0})</span>
+                </div>
+
+                {(selectedCustomer.rewardPoints || 0) > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max={Math.min(selectedCustomer.rewardPoints || 0, subtotal)}
+                      value={pointsToRedeem || ''}
+                      onChange={(e) => {
+                        const val = Math.min(Number(e.target.value) || 0, selectedCustomer.rewardPoints || 0, subtotal);
+                        setPointsToRedeem(val);
+                      }}
+                      placeholder="পয়েন্ট"
+                      style={{ width: '55px', padding: '2px 4px', fontSize: '11px', borderRadius: '4px', border: '1px solid #93c5fd', textAlign: 'center' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (pointsToRedeem > 0) {
+                          setPointsToRedeem(0);
+                        } else {
+                          const maxRedeem = Math.min(selectedCustomer.rewardPoints || 0, subtotal);
+                          setPointsToRedeem(maxRedeem);
+                          toast.success(`${maxRedeem} পয়েন্ট রিডিম করা হয়েছে!`);
+                        }
+                      }}
+                      style={{
+                        background: pointsToRedeem > 0 ? '#ef4444' : '#10b981',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        fontWeight: '700',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {pointsToRedeem > 0 ? 'রদ' : 'সর্বোচ্চ রিডিম'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -784,25 +959,44 @@ const POSTerminal = () => {
                       </div>
                       <div style={{ fontSize: '12px', color: '#64748b' }}>
                         {formatCurrency(item.price)} প্রতি {item.unit}
+                        {item.quantity < 1 && (String(item.unit || '').toLowerCase().includes('কেজি') || String(item.unit || '').toLowerCase().includes('kg')) && (
+                          <span style={{ color: '#059669', fontWeight: '700', marginLeft: '6px' }}>
+                            ({Math.round(item.quantity * 1000)} গ্রাম)
+                          </span>
+                        )}
+                        {item.quantity < 1 && (String(item.unit || '').toLowerCase().includes('লিটার') || String(item.unit || '').toLowerCase().includes('ltr')) && (
+                          <span style={{ color: '#059669', fontWeight: '700', marginLeft: '6px' }}>
+                            ({Math.round(item.quantity * 1000)} মিলি)
+                          </span>
+                        )}
                       </div>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <button
-                        onClick={() => updateQuantity(idx, item.isLoose ? -0.25 : -1)}
+                        onClick={() => updateQuantity(idx, item.isLoose ? -0.05 : -1)}
                         style={{ background: '#fff', border: '1px solid #cbd5e1', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <MdRemove size={14} />
                       </button>
                       <input
-                        type="number"
-                        step="any"
+                        type="text"
+                        inputMode="decimal"
                         value={item.quantity}
-                        onChange={(e) => setCustomQty(idx, e.target.value)}
-                        style={{ width: '56px', textAlign: 'center', padding: '4px 2px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: '800' }}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          if (raw === '' || raw === '.' || raw === '0.') {
+                            const newCart = [...cart];
+                            newCart[idx].quantity = raw;
+                            setCart(newCart);
+                            return;
+                          }
+                          setCustomQty(idx, raw);
+                        }}
+                        style={{ width: '62px', textAlign: 'center', padding: '4px 2px', borderRadius: '4px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: '800' }}
                       />
                       <button
-                        onClick={() => updateQuantity(idx, item.isLoose ? 0.25 : 1)}
+                        onClick={() => updateQuantity(idx, item.isLoose ? 0.05 : 1)}
                         style={{ background: '#fff', border: '1px solid #cbd5e1', width: '26px', height: '26px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                       >
                         <MdAdd size={14} />
@@ -823,34 +1017,114 @@ const POSTerminal = () => {
                     </button>
                   </div>
 
-                  {/* Quick Weight & Amount Buttons for Loose Items (e.g. 250gm Rice, 50Tk Oil) */}
+                  {/* Quick Weight & Volume Presets for Loose Items (e.g. 150gm Rice, .220ml Oil) */}
                   {item.isLoose && (
                     <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', paddingTop: '4px', borderTop: '1px dashed #e2e8f0' }}>
-                      {[
-                        { label: '১০০ গ্রাম', val: 0.1 },
-                        { label: '২৫০ গ্রাম', val: 0.25 },
-                        { label: '৫০০ গ্রাম', val: 0.5 },
-                        { label: '১ কেজি', val: 1.0 },
-                        { label: '২ কেজি', val: 2.0 }
-                      ].map(quick => (
-                        <button
-                          key={quick.val}
-                          type="button"
-                          onClick={() => setCustomQty(idx, quick.val)}
-                          style={{
-                            fontSize: '11px',
-                            padding: '2px 6px',
-                            borderRadius: '4px',
-                            border: '1px solid #cbd5e1',
-                            background: Number(item.quantity) === quick.val ? '#2563eb' : '#ffffff',
-                            color: Number(item.quantity) === quick.val ? '#ffffff' : '#334155',
-                            cursor: 'pointer',
-                            fontWeight: '600'
-                          }}
-                        >
-                          {quick.label}
-                        </button>
-                      ))}
+                      {String(item.unit || '').toLowerCase().includes('লিটার') || String(item.unit || '').toLowerCase().includes('ltr') ? (
+                        <>
+                          {[
+                            { label: '৫০ মিলি', val: 0.05 },
+                            { label: '১০০ মিলি', val: 0.1 },
+                            { label: '১৫০ মিলি', val: 0.15 },
+                            { label: '২২০ মিলি', val: 0.22 },
+                            { label: '২৫০ মিলি', val: 0.25 },
+                            { label: '৫০০ মিলি', val: 0.5 },
+                            { label: '১ লিটার', val: 1.0 }
+                          ].map((quick) => (
+                            <button
+                              key={quick.val}
+                              type="button"
+                              onClick={() => setCustomQty(idx, quick.val)}
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                border: '1px solid #cbd5e1',
+                                background: Number(item.quantity) === quick.val ? '#2563eb' : '#ffffff',
+                                color: Number(item.quantity) === quick.val ? '#ffffff' : '#334155',
+                                cursor: 'pointer',
+                                fontWeight: '600'
+                              }}
+                            >
+                              {quick.label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const ml = prompt(`মিলিলিটার (ml) পরিমাপ লিখুন (যেমন: 220):`, '220');
+                              if (ml) {
+                                const ltr = Math.round((parseFloat(ml) / 1000) * 1000) / 1000;
+                                if (!isNaN(ltr) && ltr > 0) setCustomQty(idx, ltr);
+                              }
+                            }}
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              border: '1px solid #bfdbfe',
+                              background: '#eff6ff',
+                              color: '#1d4ed8',
+                              cursor: 'pointer',
+                              fontWeight: '700'
+                            }}
+                          >
+                            🧪 মিলিতে লিখুন
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {[
+                            { label: '৫০ গ্রাম', val: 0.05 },
+                            { label: '১০০ গ্রাম', val: 0.1 },
+                            { label: '১৫০ গ্রাম', val: 0.15 },
+                            { label: '২৫০ গ্রাম', val: 0.25 },
+                            { label: '৫০০ গ্রাম', val: 0.5 },
+                            { label: '১ কেজি', val: 1.0 },
+                            { label: '২ কেজি', val: 2.0 }
+                          ].map((quick) => (
+                            <button
+                              key={quick.val}
+                              type="button"
+                              onClick={() => setCustomQty(idx, quick.val)}
+                              style={{
+                                fontSize: '11px',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                border: '1px solid #cbd5e1',
+                                background: Number(item.quantity) === quick.val ? '#2563eb' : '#ffffff',
+                                color: Number(item.quantity) === quick.val ? '#ffffff' : '#334155',
+                                cursor: 'pointer',
+                                fontWeight: '600'
+                              }}
+                            >
+                              {quick.label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const gm = prompt(`গ্রাম (Gram) পরিমাপ লিখুন (যেমন: 150):`, '150');
+                              if (gm) {
+                                const kg = Math.round((parseFloat(gm) / 1000) * 1000) / 1000;
+                                if (!isNaN(kg) && kg > 0) setCustomQty(idx, kg);
+                              }
+                            }}
+                            style={{
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              border: '1px solid #bfdbfe',
+                              background: '#eff6ff',
+                              color: '#1d4ed8',
+                              cursor: 'pointer',
+                              fontWeight: '700'
+                            }}
+                          >
+                            ⚖️ গ্রামে লিখুন
+                          </button>
+                        </>
+                      )}
                       <button
                         type="button"
                         onClick={() => {
@@ -1016,8 +1290,13 @@ const POSTerminal = () => {
       {isCustomerModalOpen && (
         <QuickAddCustomerModal
           shopId={shopId}
+          initialPhone={customerSearchQuery}
           onClose={() => setIsCustomerModalOpen(false)}
-          onCustomerAdded={(newCust) => setSelectedCustomer(newCust)}
+          onCustomerAdded={(newCust) => {
+            setSelectedCustomer(newCust);
+            setCustomerSearchQuery('');
+            setIsCustomerDropdownOpen(false);
+          }}
         />
       )}
 

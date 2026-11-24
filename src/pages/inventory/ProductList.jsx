@@ -679,6 +679,7 @@ const ProductList = () => {
         <ProductFormModal
           shopId={shopId}
           productToEdit={editingProduct}
+          existingCategories={categories.filter(c => c !== 'All')}
           onClose={() => setIsModalOpen(false)}
         />
       )}

@@ -4,9 +4,9 @@ import { db } from '../firebase/config';
 import { toast } from 'react-hot-toast';
 import { MdClose, MdPersonAdd } from 'react-icons/md';
 
-const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded }) => {
+const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone = '' }) => {
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [phone, setPhone] = useState(initialPhone || '');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
 

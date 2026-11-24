@@ -27,6 +27,20 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
   const slogan = shopConfig?.slogan || 'আপনার বিশ্বস্ত শপ';
   const returnPolicy = shopConfig?.returnPolicy || 'বিক্রিত পণ্য ৩ দিনের মধ্যে ক্যাশ মেমো সহ ফেরতযোগ্য।';
 
+  const formatQuantity = (qty, unit = '') => {
+    const num = Number(qty) || 0;
+    const u = String(unit || '').toLowerCase();
+    if (num < 1 && (u.includes('কেজি') || u.includes('kg'))) {
+      const gm = Math.round(num * 1000);
+      return `${num} ${unit} (${gm} গ্রাম)`;
+    }
+    if (num < 1 && (u.includes('লিটার') || u.includes('ltr') || u.includes('liter'))) {
+      const ml = Math.round(num * 1000);
+      return `${num} ${unit} (${ml} মিলি)`;
+    }
+    return `${num} ${unit || ''}`;
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -220,7 +234,7 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                           <div>{item.name}</div>
                           {item.discount > 0 && <span style={{ fontSize: '10px', color: '#666' }}>(ছাড়: ৳{item.discount})</span>}
                         </td>
-                        <td style={{ padding: '4px 0', textAlign: 'center' }}>{item.quantity} {item.unit || ''}</td>
+                        <td style={{ padding: '4px 0', textAlign: 'center' }}>{formatQuantity(item.quantity, item.unit)}</td>
                         <td style={{ padding: '4px 0', textAlign: 'right' }}>{item.price}</td>
                         <td style={{ padding: '4px 0', textAlign: 'right' }}><b>{item.total}</b></td>
                       </tr>
@@ -274,10 +288,25 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                   )}
                 </div>
 
-                {/* Rewards Point Info */}
-                {invoice.pointsEarned > 0 && (
-                  <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '4px', textAlign: 'center', margin: '8px 0', fontSize: '11px' }}>
-                    🎁 এই ক্রয়ে অর্জিত পয়েন্ট: <b>+{invoice.pointsEarned} পয়েন্ট</b>
+                {/* Rewards & Loyalty Point Balance Info */}
+                {(invoice.customerPhone || invoice.customerRewardPoints !== undefined || invoice.pointsEarned > 0 || invoice.pointsRedeemed > 0) && (
+                  <div style={{
+                    background: '#eff6ff',
+                    border: '1px dashed #bfdbfe',
+                    padding: '6px 8px',
+                    borderRadius: '4px',
+                    margin: '8px 0',
+                    fontSize: '11px',
+                    textAlign: 'center',
+                    color: '#1e3a8a'
+                  }}>
+                    <div style={{ fontWeight: '800', marginBottom: '2px' }}>🎁 লয়্যালটি রিওয়ার্ড পয়েন্টস (Loyalty Points)</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: '4px' }}>
+                      <span>পূর্বের: <b>{invoice.customerRewardPoints || 0} pt</b></span>
+                      {invoice.pointsRedeemed > 0 && <span style={{ color: '#dc2626' }}>ব্যবহৃত: <b>-{invoice.pointsRedeemed}</b></span>}
+                      {invoice.pointsEarned > 0 && <span style={{ color: '#059669' }}>অর্জিত: <b>+{invoice.pointsEarned}</b></span>}
+                      <span>বর্তমান ব্যালান্স: <b>{invoice.finalCustomerPoints !== undefined ? invoice.finalCustomerPoints : (Number(invoice.customerRewardPoints || 0) + Number(invoice.pointsEarned || 0) - Number(invoice.pointsRedeemed || 0))} pt</b></span>
+                    </div>
                   </div>
                 )}
 
@@ -337,7 +366,7 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                         <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px' }}>
                           <b>{item.name}</b>
                         </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>{item.quantity} {item.unit || ''}</td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>{formatQuantity(item.quantity, item.unit)}</td>
                         <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'right' }}>{item.price}</td>
                         <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'right' }}><b>{item.total}</b></td>
                       </tr>
@@ -351,6 +380,17 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                     <div style={{ background: '#f8fafc', padding: '10px', borderRadius: '6px', fontSize: '13px' }}>
                       <b>কথায়:</b> {numberToBengaliWords(invoice.grandTotal)}
                     </div>
+                    {invoice.customerPhone && (
+                      <div style={{ marginTop: '8px', background: '#eff6ff', border: '1px dashed #bfdbfe', padding: '8px 10px', borderRadius: '6px', fontSize: '12px' }}>
+                        <div style={{ fontWeight: '700', color: '#1e40af', marginBottom: '2px' }}>🎁 লয়্যালটি রিওয়ার্ড পয়েন্টস</div>
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', color: '#334155' }}>
+                          <span>পূর্বের: <b>{invoice.customerRewardPoints || 0} pt</b></span>
+                          {invoice.pointsRedeemed > 0 && <span style={{ color: '#dc2626' }}>ব্যবহৃত: <b>-{invoice.pointsRedeemed}</b></span>}
+                          {invoice.pointsEarned > 0 && <span style={{ color: '#059669' }}>অর্জিত: <b>+{invoice.pointsEarned}</b></span>}
+                          <span>ব্যালান্স: <b>{invoice.finalCustomerPoints !== undefined ? invoice.finalCustomerPoints : (Number(invoice.customerRewardPoints || 0) + Number(invoice.pointsEarned || 0) - Number(invoice.pointsRedeemed || 0))} pt</b></span>
+                        </div>
+                      </div>
+                    )}
                     <div style={{ marginTop: '12px', fontSize: '12px', color: '#555' }}>
                       <p><b>শর্তাবলী:</b> {returnPolicy}</p>
                     </div>
@@ -458,7 +498,7 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                           <div style={{ fontWeight: '600', color: '#0f172a' }}>{item.name}</div>
                           {item.barcode && <div style={{ fontSize: '11px', color: '#94a3b8' }}>বারকোড: {item.barcode}</div>}
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{item.quantity} {item.unit || ''}</td>
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>{formatQuantity(item.quantity, item.unit)}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'right' }}>{formatCurrency(item.price)}</td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', color: '#059669' }}>
                           {item.discount > 0 ? formatCurrency(item.discount) : '-'}
@@ -474,7 +514,18 @@ const InvoiceViewModal = ({ invoice, shopConfig, onClose, initialFormat = 'pos' 
                   <div>
                     <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '14px', fontSize: '13px' }}>
                       <p style={{ margin: '0 0 6px' }}><b>টাকার পরিমাণ (কথায়):</b> {numberToBengaliWords(invoice.grandTotal)}</p>
-                      <p style={{ margin: '0', color: '#1e40af' }}>{returnPolicy}</p>
+                      {invoice.customerPhone && (
+                        <div style={{ marginTop: '8px', background: '#ffffff', border: '1px dashed #93c5fd', padding: '8px 10px', borderRadius: '6px', fontSize: '12px' }}>
+                          <div style={{ fontWeight: '700', color: '#1e40af', marginBottom: '2px' }}>🎁 লয়্যালটি রিওয়ার্ড পয়েন্টস (Loyalty Points)</div>
+                          <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', color: '#334155' }}>
+                            <span>পূর্বের: <b>{invoice.customerRewardPoints || 0} pt</b></span>
+                            {invoice.pointsRedeemed > 0 && <span style={{ color: '#dc2626' }}>ব্যবহৃত: <b>-{invoice.pointsRedeemed} pt</b></span>}
+                            {invoice.pointsEarned > 0 && <span style={{ color: '#059669' }}>অর্জিত: <b>+{invoice.pointsEarned} pt</b></span>}
+                            <span>বর্তমান ব্যালান্স: <b>{invoice.finalCustomerPoints !== undefined ? invoice.finalCustomerPoints : (Number(invoice.customerRewardPoints || 0) + Number(invoice.pointsEarned || 0) - Number(invoice.pointsRedeemed || 0))} pt</b></span>
+                          </div>
+                        </div>
+                      )}
+                      <p style={{ margin: '8px 0 0', color: '#1e40af' }}>{returnPolicy}</p>
                     </div>
                   </div>
 

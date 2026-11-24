@@ -1,17 +1,17 @@
-import React, { useState } from 'react';
-import { doc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { doc, setDoc, addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { uploadToCloudinary } from '../../utils/imageUploadHelper';
 import { generateRandomBarcode } from '../../utils/barcodeHelper';
 import { toast } from 'react-hot-toast';
 import { MdClose, MdCloudUpload, MdQrCode, MdSave } from 'react-icons/md';
 
-const ProductFormModal = ({ shopId, productToEdit, onClose, onSave }) => {
+const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCategories = [] }) => {
   const [name, setName] = useState(productToEdit?.name || '');
   const [nameBn, setNameBn] = useState(productToEdit?.nameBn || '');
   const [barcode, setBarcode] = useState(productToEdit?.barcode || '');
   const [sku, setSku] = useState(productToEdit?.sku || '');
-  const [category, setCategory] = useState(productToEdit?.category || 'General');
+  const [category, setCategory] = useState(productToEdit?.category || 'মুদি সামগ্রী');
   const [unit, setUnit] = useState(productToEdit?.unit || 'টি (Pcs)');
   const [isLoose, setIsLoose] = useState(productToEdit?.isLoose || false);
   const [costPrice, setCostPrice] = useState(productToEdit?.costPrice || '');
@@ -20,6 +20,36 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave }) => {
   const [stock, setStock] = useState(productToEdit?.stock || '0');
   const [minStockAlert, setMinStockAlert] = useState(productToEdit?.minStockAlert || '5');
   const [imageUrl, setImageUrl] = useState(productToEdit?.imageUrl || '');
+
+  const defaultPopularCategories = [
+    'মুদি সামগ্রী',
+    'চাল ও ডাল',
+    'তেল ও ঘি',
+    'মসলা ও লবণ',
+    'পানীয় ও জুস',
+    'স্ন্যাক্স ও বিস্কুট',
+    'সাবান ও প্রসাধন',
+    'স্টেশনারি'
+  ];
+
+  const [availableCategories, setAvailableCategories] = useState(() => {
+    const list = [...new Set([...(existingCategories || []), ...defaultPopularCategories])];
+    return list.filter(Boolean);
+  });
+
+  useEffect(() => {
+    if (shopId) {
+      getDocs(collection(db, 'shops', shopId, 'products')).then(snap => {
+        const catSet = new Set(defaultPopularCategories);
+        (existingCategories || []).forEach(c => c && catSet.add(c));
+        snap.forEach(d => {
+          const c = d.data()?.category;
+          if (c) catSet.add(c);
+        });
+        setAvailableCategories(Array.from(catSet));
+      }).catch(err => console.warn(err));
+    }
+  }, [shopId]);
 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -188,16 +218,49 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave }) => {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '6px' }}>
-                ক্যাটাগরি
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: '600', color: '#334155', margin: 0 }}>
+                  ক্যাটাগরি (Category)
+                </label>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>আগের ক্যাটাগরি বেছে নিন বা নতুন লিখুন</span>
+              </div>
               <input
                 type="text"
+                list="product-category-list"
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                placeholder="যেমন: মুদি, পানীয়, স্টেশনারি"
+                placeholder="যেমন: চাল ও ডাল, মুদি, পানীয়..."
                 style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none' }}
               />
+              <datalist id="product-category-list">
+                {availableCategories.map((catName) => (
+                  <option key={catName} value={catName} />
+                ))}
+              </datalist>
+
+              {/* Quick Category Badges */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '8px' }}>
+                {availableCategories.slice(0, 10).map((catName) => (
+                  <button
+                    key={catName}
+                    type="button"
+                    onClick={() => setCategory(catName)}
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: '12px',
+                      border: '1px solid',
+                      borderColor: category === catName ? '#2563eb' : '#cbd5e1',
+                      background: category === catName ? '#eff6ff' : '#f8fafc',
+                      color: category === catName ? '#2563eb' : '#475569',
+                      fontSize: '11px',
+                      fontWeight: category === catName ? '700' : '500',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    + {catName}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
