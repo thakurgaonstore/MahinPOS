@@ -21,8 +21,10 @@ import {
   MdBackup,
   MdRestore,
   MdCheckCircle,
-  MdWarning
+  MdWarning,
+  MdDeleteSweep
 } from 'react-icons/md';
+import DataArchiveModal from './DataArchiveModal';
 
 const ShopSettings = () => {
   const { userProfile } = useAuth();
@@ -53,6 +55,7 @@ const ShopSettings = () => {
   const [lastBackupFileUrl, setLastBackupFileUrl] = useState('');
   const [backupLoading, setBackupLoading] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
 
@@ -540,8 +543,44 @@ const ShopSettings = () => {
               />
             </label>
           </div>
+
+          {/* 4. Archive Old Invoices & Free Storage */}
+          <div style={{ border: '1px solid #fed7aa', borderRadius: '10px', padding: '16px', background: '#fff7ed' }}>
+            <h4 style={{ fontSize: '14px', fontWeight: '700', margin: '0 0 6px 0', color: '#c2410c' }}>৪. পুরাতন ইনভয়েস আর্কাইভ ও ডাটাবেস খালি করুন</h4>
+            <p style={{ fontSize: '12px', color: '#9a3412', margin: '0 0 14px 0' }}>হিসাব ও বাৎসরিক লাভ-ক্ষতি অক্ষুণ্ণ রেখে ১ বছর পুরাতন ইনভয়েস ব্যাকআপ ও ডাটাবেস ফ্রি করুন।</p>
+            <button
+              type="button"
+              onClick={() => setIsArchiveModalOpen(true)}
+              style={{
+                width: '100%',
+                padding: '10px',
+                borderRadius: '8px',
+                border: 'none',
+                background: '#ea580c',
+                color: '#fff',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 6px rgba(234, 88, 12, 0.3)'
+              }}
+            >
+              <MdDeleteSweep size={18} /> আর্কাইভ ও ক্লিনআপ করুন
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Archive and Purge Modal */}
+      {isArchiveModalOpen && (
+        <DataArchiveModal
+          shopId={shopId}
+          onClose={() => setIsArchiveModalOpen(false)}
+        />
+      )}
     </div>
   );
 };
