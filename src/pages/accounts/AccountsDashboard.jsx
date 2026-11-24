@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
+import { Link } from 'react-router-dom';
 import {
   MdTrendingUp,
   MdTrendingDown,
@@ -13,7 +14,11 @@ import {
   MdAssignmentReturn,
   MdDateRange,
   MdArchive,
-  MdSecurity
+  MdSecurity,
+  MdInventory,
+  MdLocalShipping,
+  MdSearch,
+  MdArrowForward
 } from 'react-icons/md';
 import { getArchivedYearlySummaries } from '../../utils/dataArchiveManager';
 import {
@@ -34,10 +39,25 @@ const AccountsDashboard = () => {
 
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [stockLogs, setStockLogs] = useState([]);
   const [archivedSummaries, setArchivedSummaries] = useState([]);
   const [timeRange, setTimeRange] = useState('today'); // 'today' | 'month' | 'year' | 'all' | 'custom'
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+
+  // Active ledger tab: 'expenses' | 'purchases' | 'cogs'
+  const [activeLedgerTab, setActiveLedgerTab] = useState('expenses');
+  const [expenseSearch, setExpenseSearch] = useState('');
+  const [purchaseSearch, setPurchaseSearch] = useState('');
+
+  const ledgerSectionRef = useRef(null);
+
+  const scrollToLedger = (tab) => {
+    setActiveLedgerTab(tab);
+    if (ledgerSectionRef.current) {
+      ledgerSectionRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
 
   useEffect(() => {
     if (!shopId) return;
@@ -47,7 +67,7 @@ const AccountsDashboard = () => {
       setArchivedSummaries(summaries || []);
     });
 
-    // Spark Plan Optimized Limit: latest 300 records
+    // Realtime Sales (latest 300)
     const salesQuery = query(collection(db, 'shops', shopId, 'sales'), orderBy('createdAt', 'desc'), limit(300));
     const unsubSales = onSnapshot(salesQuery, (snap) => {
       const list = [];
@@ -55,7 +75,7 @@ const AccountsDashboard = () => {
       setSales(list);
     });
 
-    // Fetch Expenses (latest 300)
+    // Realtime Expenses (latest 300)
     const expQuery = query(collection(db, 'shops', shopId, 'expenses'), orderBy('createdAt', 'desc'), limit(300));
     const unsubExp = onSnapshot(expQuery, (snap) => {
       const list = [];
@@ -63,9 +83,20 @@ const AccountsDashboard = () => {
       setExpenses(list);
     });
 
+    // Realtime Stock Inward / Purchase Logs (latest 300)
+    const stockQuery = query(collection(db, 'shops', shopId, 'stock_logs'), orderBy('createdAt', 'desc'), limit(300));
+    const unsubStock = onSnapshot(stockQuery, (snap) => {
+      const list = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setStockLogs(list);
+    }, (err) => {
+      console.warn("Stock logs listener warning:", err);
+    });
+
     return () => {
       unsubSales();
       unsubExp();
+      unsubStock();
     };
   }, [shopId]);
 
@@ -95,28 +126,65 @@ const AccountsDashboard = () => {
   };
 
   const filteredSales = sales.filter((s) => isMatchPeriod(s.createdAt));
-  const filteredExpenses = expenses.filter((e) => isMatchPeriod(e.createdAt));
+  const filteredExpenses = expenses.filter((e) => isMatchPeriod(e.createdAt || e.date));
+  const filteredStockLogs = stockLogs.filter((l) => isMatchPeriod(l.createdAt));
 
   // Financial Calculations (Live Active Records)
   const liveGrossRevenue = filteredSales.reduce((acc, s) => acc + (Number(s.grandTotal) || 0), 0);
   const liveTotalReturns = filteredSales.reduce((acc, s) => acc + (Number(s.totalRefundAmount) || 0), 0);
   const liveNetRevenue = Math.max(0, liveGrossRevenue - liveTotalReturns);
 
-  // Cost of Goods Sold (COGS) adjusted for net sold items
+  // Cost of Goods Sold (COGS) & Itemized Map
   let liveCostOfGoods = 0;
+  const cogsMap = {};
+
   filteredSales.forEach((s) => {
     if (s.items && Array.isArray(s.items)) {
       s.items.forEach((item) => {
         const netQty = Math.max(0, (Number(item.quantity) || 0) - (Number(item.returnedQty) || 0));
-        liveCostOfGoods += (Number(item.costPrice) || 0) * netQty;
+        const itemCOGS = (Number(item.costPrice) || 0) * netQty;
+        liveCostOfGoods += itemCOGS;
+
+        if (netQty > 0) {
+          const key = item.productId || item.name;
+          if (!cogsMap[key]) {
+            cogsMap[key] = {
+              name: item.name,
+              nameBn: item.nameBn || '',
+              unit: item.unit || 'টি',
+              quantity: 0,
+              costPrice: Number(item.costPrice) || 0,
+              sellingPrice: Number(item.price) || 0,
+              totalCost: 0,
+              totalSales: 0
+            };
+          }
+          cogsMap[key].quantity += netQty;
+          cogsMap[key].totalCost += itemCOGS;
+          cogsMap[key].totalSales += (Number(item.price) || 0) * netQty;
+        }
       });
     }
   });
+
+  const cogsList = Object.values(cogsMap).sort((a, b) => b.totalCost - a.totalCost);
 
   const liveExpenses = filteredExpenses.reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
   const payrollExpenseTotal = filteredExpenses
     .filter((e) => e.category === 'স্টাফ বেতন ও বোনাস' || (e.title && e.title.includes('স্টাফ বেতন')))
     .reduce((acc, e) => acc + (Number(e.amount) || 0), 0);
+
+  // Category-wise Expense Breakdown
+  const expenseByCategory = filteredExpenses.reduce((acc, e) => {
+    const cat = e.category || 'অন্যান্য খরচ';
+    acc[cat] = (acc[cat] || 0) + (Number(e.amount) || 0);
+    return acc;
+  }, {});
+
+  // Total Purchase Batch Cost in this period
+  const totalPurchaseCost = filteredStockLogs.reduce((sum, l) => {
+    return sum + (Number(l.batchTotalCost) || (Number(l.addedQuantity || 0) * Number(l.purchaseCostPrice || 0)));
+  }, 0);
 
   // Merge permanent archived yearly summaries if applicable ('all' or 'year')
   let archivedGross = 0;
@@ -160,10 +228,6 @@ const AccountsDashboard = () => {
   const netProfit = grossProfit - totalExpenses;
   const totalInvoicesCount = filteredSales.length + archivedInvoicesCount;
 
-  // Total Cash & Due
-  const totalPaid = filteredSales.reduce((acc, s) => acc + (Number(s.paidAmount) || 0), 0);
-  const totalDue = filteredSales.reduce((acc, s) => acc + (Number(s.dueAmount) || 0), 0);
-
   // Chart Data: Payment Breakdown
   const paymentBreakdown = {};
   filteredSales.forEach((s) => {
@@ -177,10 +241,33 @@ const AccountsDashboard = () => {
     { name: 'মোট বিক্রয়', amount: grossRevenue },
     { name: 'ফেরত', amount: totalReturns },
     { name: 'নিট বিক্রয়', amount: netRevenue },
-    { name: 'ক্রয় খরচ', amount: totalCostOfGoods },
+    { name: 'ক্রয় খরচ (COGS)', amount: totalCostOfGoods },
     { name: 'দোকান খরচ', amount: totalExpenses },
     { name: 'নিট লাভ', amount: Math.max(0, netProfit) }
   ];
+
+  // Filtered Expense Rows Search
+  const searchedExpenses = filteredExpenses.filter((e) => {
+    if (!expenseSearch.trim()) return true;
+    const q = expenseSearch.toLowerCase();
+    return (
+      (e.title || '').toLowerCase().includes(q) ||
+      (e.category || '').toLowerCase().includes(q) ||
+      (e.note || '').toLowerCase().includes(q)
+    );
+  });
+
+  // Filtered Purchase Log Rows Search
+  const searchedPurchases = filteredStockLogs.filter((l) => {
+    if (!purchaseSearch.trim()) return true;
+    const q = purchaseSearch.toLowerCase();
+    return (
+      (l.productName || '').toLowerCase().includes(q) ||
+      (l.productBarcode || '').includes(q) ||
+      (l.supplierName || '').toLowerCase().includes(q) ||
+      (l.voucherNo || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div>
@@ -198,9 +285,10 @@ const AccountsDashboard = () => {
           display: 'flex',
           gap: '6px',
           background: '#ffffff',
-          padding: '4px',
+          padding: '6px',
           borderRadius: '10px',
           border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
           flexWrap: 'wrap'
         }}>
           {[
@@ -214,14 +302,15 @@ const AccountsDashboard = () => {
               key={tab.id}
               onClick={() => setTimeRange(tab.id)}
               style={{
-                padding: '6px 14px',
-                borderRadius: '8px',
+                padding: '6px 12px',
+                borderRadius: '6px',
                 border: 'none',
                 background: timeRange === tab.id ? '#2563eb' : 'transparent',
-                color: timeRange === tab.id ? '#ffffff' : '#64748b',
+                color: timeRange === tab.id ? '#ffffff' : '#475569',
                 fontSize: '12px',
                 fontWeight: '700',
-                cursor: 'pointer'
+                cursor: 'pointer',
+                transition: 'all 0.2s'
               }}
             >
               {tab.label}
@@ -230,71 +319,54 @@ const AccountsDashboard = () => {
         </div>
       </div>
 
-      {/* Archived Ledger Integration Notice */}
-      {archivedGross > 0 && (
-        <div style={{
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: '10px',
-          padding: '10px 14px',
-          marginBottom: '16px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          fontSize: '13px',
-          color: '#1e40af'
-        }}>
-          <MdSecurity size={18} color="#2563eb" />
-          <span>
-            <b>স্থায়ী বাৎসরিক লেজার সিঙ্ক:</b> ডাটাবেস খালি রাখার উদ্দেশ্যে পূর্বে আর্কাইভকৃত {archivedSummaries.length} টি বছরের চূড়ান্ত হিসাব ({formatCurrency(archivedGross)}) স্বয়ংক্রিয়ভাবে এই রিপোর্টে সমন্বিত রয়েছে।
-          </span>
-        </div>
-      )}
-
-      {/* Custom Date Filters */}
+      {/* Custom Date Pickers */}
       {timeRange === 'custom' && (
         <div style={{
           background: '#ffffff',
           padding: '12px 16px',
           borderRadius: '10px',
-          border: '1px solid #cbd5e1',
-          marginBottom: '16px',
+          border: '1px solid #e2e8f0',
+          marginBottom: '20px',
           display: 'flex',
-          alignItems: 'center',
           gap: '12px',
+          alignItems: 'center',
           flexWrap: 'wrap'
         }}>
-          <span style={{ fontSize: '13px', fontWeight: '700', color: '#334155' }}>কাস্টম সময়কাল:</span>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#475569' }}>কাস্টম সময়সীমা:</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>শুরু:</span>
+            <span style={{ fontSize: '12px', color: '#64748b' }}>হতে:</span>
             <input
               type="date"
               value={customStartDate}
               onChange={(e) => setCustomStartDate(e.target.value)}
-              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
             />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '12px', color: '#64748b' }}>শেষ:</span>
+            <span style={{ fontSize: '12px', color: '#64748b' }}>পর্যন্ত:</span>
             <input
               type="date"
               value={customEndDate}
               onChange={(e) => setCustomEndDate(e.target.value)}
-              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+              style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
             />
           </div>
         </div>
       )}
 
-      {/* KPI Cards Grid (6 Cards) */}
+      {/* 6 Key Financial Metrics KPI Grid (Interactive Drill-down) */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
         gap: '14px',
-        marginBottom: '20px'
+        marginBottom: '24px'
       }}>
         {/* 1. Gross Revenue */}
-        <div style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        <div
+          onClick={() => scrollToLedger('cogs')}
+          title="বিক্রিত পণ্যের তালিকা ও বিক্রয় দেখতে ক্লিক করুন"
+          style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0', cursor: 'pointer', transition: 'transform 0.2s, box-shadow 0.2s' }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
             <span style={{ fontSize: '12px', fontWeight: '700', color: '#64748b' }}>১. মোট বিক্রয় (Gross Sales)</span>
             <div style={{ background: '#eff6ff', padding: '6px', borderRadius: '6px', color: '#2563eb' }}><MdShoppingCart size={18} /></div>
@@ -304,14 +376,16 @@ const AccountsDashboard = () => {
         </div>
 
         {/* 2. Total Returns */}
-        <div style={{ padding: '16px 20px', borderRadius: '12px', border: '1px solid #fecaca', background: '#fffafa' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#dc2626' }}>২. মোট ফেরত (Returns)</span>
-            <div style={{ background: '#fee2e2', padding: '6px', borderRadius: '6px', color: '#dc2626' }}><MdAssignmentReturn size={18} /></div>
+        <Link to="/dashboard/returns" style={{ textDecoration: 'none' }}>
+          <div style={{ padding: '16px 20px', borderRadius: '12px', border: '1px solid #fecaca', background: '#fffafa', cursor: 'pointer' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: '#dc2626' }}>২. মোট ফেরত (Returns)</span>
+              <div style={{ background: '#fee2e2', padding: '6px', borderRadius: '6px', color: '#dc2626' }}><MdAssignmentReturn size={18} /></div>
+            </div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#dc2626' }}>- {formatCurrency(totalReturns)}</div>
+            <span style={{ fontSize: '11px', color: '#dc2626' }}>গ্রাহককে ফেরত দেওয়া রিফান্ড ↗</span>
           </div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#dc2626' }}>- {formatCurrency(totalReturns)}</div>
-          <span style={{ fontSize: '11px', color: '#dc2626' }}>গ্রাহককে ফেরত দেওয়া রিফান্ড</span>
-        </div>
+        </Link>
 
         {/* 3. Net Revenue */}
         <div style={{ padding: '16px 20px', borderRadius: '12px', border: '1px solid #a7f3d0', background: '#f0fdf4' }}>
@@ -323,25 +397,39 @@ const AccountsDashboard = () => {
           <span style={{ fontSize: '11px', color: '#059669' }}>মোট বিক্রয় বিয়োগ রিটার্ন</span>
         </div>
 
-        {/* 4. COGS */}
-        <div style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        {/* 4. COGS (Clickable to Purchase & Restock Log) */}
+        <div
+          onClick={() => scrollToLedger('purchases')}
+          title="কোন পণ্য কবে ক্রয় ও রিস্টক করা হয়েছে দেখতে ক্লিক করুন"
+          style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '2px solid #cbd5e1', cursor: 'pointer', boxShadow: '0 2px 6px rgba(0,0,0,0.04)' }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#64748b' }}>৪. ক্রয় খরচ (COGS)</span>
-            <div style={{ background: '#f8fafc', padding: '6px', borderRadius: '6px', color: '#475569' }}><MdReceipt size={18} /></div>
+            <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b' }}>
+              ৪. ক্রয় খরচ (COGS) 🔍
+            </span>
+            <div style={{ background: '#f1f5f9', padding: '6px', borderRadius: '6px', color: '#2563eb' }}><MdInventory size={18} /></div>
           </div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#475569' }}>{formatCurrency(totalCostOfGoods)}</div>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>বিক্রীত পণ্যের গড় ক্রয়মূল্য</span>
+          <div style={{ fontSize: '22px', fontWeight: '900', color: '#1e293b' }}>{formatCurrency(totalCostOfGoods)}</div>
+          <span style={{ fontSize: '11px', color: '#2563eb', fontWeight: '700' }}>
+            👉 পণ্য ক্রয় হিস্ট্রি দেখতে ক্লিক করুন
+          </span>
         </div>
 
-        {/* 5. Expenses */}
-        <div style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+        {/* 5. Expenses (Clickable to Detailed Expense Ledger) */}
+        <div
+          onClick={() => scrollToLedger('expenses')}
+          title="কোন খাতে কত খরচ হয়েছে বিস্তারিত দেখতে ক্লিক করুন"
+          style={{ background: '#ffffff', padding: '16px 20px', borderRadius: '12px', border: '2px solid #fca5a5', cursor: 'pointer', boxShadow: '0 2px 6px rgba(239,68,68,0.08)' }}
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#64748b' }}>৫. দোকান খরচ (Expenses)</span>
-            <div style={{ background: '#fef2f2', padding: '6px', borderRadius: '6px', color: '#ef4444' }}><MdTrendingDown size={18} /></div>
+            <span style={{ fontSize: '12px', fontWeight: '800', color: '#991b1b' }}>
+              ৫. দোকান খরচ (Expenses) 🔍
+            </span>
+            <div style={{ background: '#fee2e2', padding: '6px', borderRadius: '6px', color: '#dc2626' }}><MdTrendingDown size={18} /></div>
           </div>
-          <div style={{ fontSize: '22px', fontWeight: '800', color: '#dc2626' }}>{formatCurrency(totalExpenses)}</div>
-          <span style={{ fontSize: '11px', color: '#64748b' }}>
-            ভাড়া, বিদ্যুৎ ও দৈনন্দিন খরচ {payrollExpenseTotal > 0 && <span style={{ color: '#4f46e5', fontWeight: '700' }}>(পে-রোল: {formatCurrency(payrollExpenseTotal)})</span>}
+          <div style={{ fontSize: '22px', fontWeight: '900', color: '#dc2626' }}>{formatCurrency(totalExpenses)}</div>
+          <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: '700' }}>
+            👉 খরচের খাতওয়ারি তালিকা দেখতে ক্লিক করুন
           </span>
         </div>
 
@@ -352,7 +440,7 @@ const AccountsDashboard = () => {
           borderRadius: '12px',
           border: '2px solid',
           borderColor: netProfit >= 0 ? '#10b981' : '#ef4444',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+          boxShadow: '0 4px 12px rgba(0,0,0,0.04)'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
             <span style={{ fontSize: '12px', fontWeight: '800', color: netProfit >= 0 ? '#065f46' : '#991b1b' }}>
@@ -375,7 +463,8 @@ const AccountsDashboard = () => {
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-        gap: '16px'
+        gap: '16px',
+        marginBottom: '28px'
       }}>
         {/* Comparison Bar */}
         <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
@@ -418,9 +507,423 @@ const AccountsDashboard = () => {
         </div>
       </div>
 
+      {/* =========================================================================
+          DETAILED TRANSACTION HISTORIES & DRILL-DOWN LEDGERS
+      ========================================================================= */}
+      <div
+        ref={ledgerSectionRef}
+        id="transaction-ledger-section"
+        style={{
+          background: '#ffffff',
+          borderRadius: '16px',
+          border: '1px solid #e2e8f0',
+          padding: '24px',
+          marginBottom: '28px',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.03)'
+        }}
+      >
+        {/* Ledger Navigation Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '14px', borderBottom: '1px solid #f1f5f9', paddingBottom: '16px' }}>
+          <div>
+            <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <MdReceipt size={22} color="#2563eb" />
+              বিস্তারিত ট্রানজ্যাকশন ও হিসাব অডিট খাতা
+            </h2>
+            <p style={{ fontSize: '13px', color: '#64748b', margin: '3px 0 0' }}>
+              কোন খাতে কত খরচ হয়েছে এবং কোন পণ্য কবে কত টাকায় ক্রয়/রিস্টক করা হয়েছে তার সম্পূর্ণ বিবরণী
+            </p>
+          </div>
+
+          {/* Ledger Tabs */}
+          <div style={{ display: 'flex', background: '#f1f5f9', padding: '4px', borderRadius: '10px', gap: '4px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setActiveLedgerTab('expenses')}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: activeLedgerTab === 'expenses' ? '#dc2626' : 'transparent',
+                color: activeLedgerTab === 'expenses' ? '#ffffff' : '#475569',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <MdTrendingDown size={16} /> খরচের বিস্তারিত খাতা ({filteredExpenses.length})
+            </button>
+            <button
+              onClick={() => setActiveLedgerTab('purchases')}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: activeLedgerTab === 'purchases' ? '#2563eb' : 'transparent',
+                color: activeLedgerTab === 'purchases' ? '#ffffff' : '#475569',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <MdInventory size={16} /> পণ্য ক্রয় ও রিস্টক হিস্ট্রি ({filteredStockLogs.length})
+            </button>
+            <button
+              onClick={() => setActiveLedgerTab('cogs')}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                border: 'none',
+                background: activeLedgerTab === 'cogs' ? '#059669' : 'transparent',
+                color: activeLedgerTab === 'cogs' ? '#ffffff' : '#475569',
+                fontWeight: '700',
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              <MdShoppingCart size={16} /> বিক্রীত পণ্যের ক্রয়মূল্য (COGS বিশ্লেষণ)
+            </button>
+          </div>
+        </div>
+
+        {/* -------------------------------------------------------------------------
+            TAB 1: EXPENSES BREAKDOWN & TRANSACTION TABLE
+        ------------------------------------------------------------------------- */}
+        {activeLedgerTab === 'expenses' && (
+          <div>
+            {/* Category Breakdown Chips */}
+            <div style={{ marginBottom: '20px' }}>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '8px' }}>
+                খাত অনুযায়ী মোট খরচের বিশ্লেষণ:
+              </span>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {Object.keys(expenseByCategory).map((cat) => (
+                  <div
+                    key={cat}
+                    style={{
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: '8px',
+                      padding: '6px 12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <span style={{ fontSize: '12px', fontWeight: '700', color: '#9f1239' }}>{cat}:</span>
+                    <span style={{ fontSize: '13px', fontWeight: '900', color: '#be123c' }}>{formatCurrency(expenseByCategory[cat])}</span>
+                  </div>
+                ))}
+
+                {Object.keys(expenseByCategory).length === 0 && (
+                  <span style={{ fontSize: '12px', color: '#94a3b8' }}>নির্বাচিত সময়ে কোনো খরচ রেকর্ড নেই</span>
+                )}
+              </div>
+            </div>
+
+            {/* Filter Search & Manage Link */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ position: 'relative', width: '300px' }}>
+                <MdSearch size={18} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  value={expenseSearch}
+                  onChange={(e) => setExpenseSearch(e.target.value)}
+                  placeholder="খরচের খাত বা শিরোনাম দিয়ে খুঁজুন..."
+                  style={{ width: '100%', padding: '8px 10px 8px 34px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '13px', fontWeight: '700', color: '#dc2626' }}>
+                  সর্বমোট খরচ: {formatCurrency(liveExpenses)}
+                </span>
+                <Link
+                  to="/dashboard/expenses"
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#dc2626',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  খরচের খাতা খুলুন / নতুন খরচ যোগ করুন <MdArrowForward size={14} />
+                </Link>
+              </div>
+            </div>
+
+            {/* Expenses Table */}
+            <div className="table-responsive">
+              <table className="pos-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                    <th style={{ padding: '10px' }}>তারিখ</th>
+                    <th style={{ padding: '10px' }}>খরচের খাত</th>
+                    <th style={{ padding: '10px' }}>বিবরণ / শিরোনাম</th>
+                    <th style={{ padding: '10px' }}>নোট / মেমো</th>
+                    <th style={{ padding: '10px' }}>এন্ট্রি করেছেন</th>
+                    <th style={{ padding: '10px', textAlign: 'right' }}>টাকার পরিমাণ (৳)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {searchedExpenses.map((e) => (
+                    <tr key={e.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '10px', color: '#64748b' }}>
+                        {formatDate(e.createdAt || e.date)}
+                      </td>
+                      <td style={{ padding: '10px' }}>
+                        <span style={{
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          background: e.category === 'স্টাফ বেতন ও বোনাস' ? '#f5f3ff' : '#fee2e2',
+                          color: e.category === 'স্টাফ বেতন ও বোনাস' ? '#7c3aed' : '#dc2626'
+                        }}>
+                          {e.category || 'সাধারণ খরচ'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '10px', fontWeight: '700', color: '#0f172a' }}>
+                        {e.title}
+                      </td>
+                      <td style={{ padding: '10px', color: '#64748b', fontSize: '12px' }}>
+                        {e.note || '---'}
+                      </td>
+                      <td style={{ padding: '10px', color: '#475569', fontSize: '12px' }}>
+                        {e.recordedBy || 'Admin'}
+                      </td>
+                      <td style={{ padding: '10px', textAlign: 'right', fontWeight: '800', color: '#dc2626' }}>
+                        {formatCurrency(e.amount)}
+                      </td>
+                    </tr>
+                  ))}
+
+                  {searchedExpenses.length === 0 && (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                        কোনো খরচের রেকর্ড পাওয়া যায়নি
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* -------------------------------------------------------------------------
+            TAB 2: PRODUCT PURCHASES & RESTOCK AUDIT LOG
+        ------------------------------------------------------------------------- */}
+        {activeLedgerTab === 'purchases' && (
+          <div>
+            {/* Purchase Summary Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ position: 'relative', width: '320px' }}>
+                <MdSearch size={18} style={{ position: 'absolute', left: '10px', top: '10px', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  value={purchaseSearch}
+                  onChange={(e) => setPurchaseSearch(e.target.value)}
+                  placeholder="পণ্য, সাপ্লায়ার বা ভাউচার দিয়ে খুঁজুন..."
+                  style={{ width: '100%', padding: '8px 10px 8px 34px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '13px', fontWeight: '700', color: '#2563eb' }}>
+                  এই সময়ে মোট ক্রয় চালান: {formatCurrency(totalPurchaseCost)}
+                </span>
+                <Link
+                  to="/dashboard/inventory"
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '8px',
+                    background: '#eff6ff',
+                    border: '1px solid #bfdbfe',
+                    color: '#2563eb',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    textDecoration: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  পণ্য রিস্টক করুন <MdArrowForward size={14} />
+                </Link>
+              </div>
+            </div>
+
+            {/* Purchases Table */}
+            <div className="table-responsive">
+              <table className="pos-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                    <th style={{ padding: '10px' }}>ক্রয়ের তারিখ ও সময়</th>
+                    <th style={{ padding: '10px' }}>পণ্যের নাম ও বারকোড</th>
+                    <th style={{ padding: '10px' }}>সাপ্লায়ার / মহাজন</th>
+                    <th style={{ padding: '10px' }}>চালান / ভাউচার</th>
+                    <th style={{ padding: '10px' }}>ক্রয়ের পরিমাণ</th>
+                    <th style={{ padding: '10px' }}>একক ক্রয়মূল্য</th>
+                    <th style={{ padding: '10px', textAlign: 'right' }}>মোট ক্রয় বিল (৳)</th>
+                    <th style={{ padding: '10px', textAlign: 'right' }}>নতুন গড় ক্রয়মূল্য</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {searchedPurchases.map((l) => {
+                    const batchCost = Number(l.batchTotalCost) || (Number(l.addedQuantity || 0) * Number(l.purchaseCostPrice || 0));
+
+                    return (
+                      <tr key={l.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px', color: '#64748b' }}>
+                          {formatDateTime(l.createdAt)}
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <div style={{ fontWeight: '800', color: '#0f172a' }}>{l.productName}</div>
+                          {l.productBarcode && (
+                            <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'monospace' }}>
+                              #{l.productBarcode}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          {l.supplierName ? (
+                            <span style={{ fontWeight: '700', color: '#2563eb' }}>
+                              🏭 {l.supplierName}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>সরাসরি ক্রয়</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px', color: '#475569', fontSize: '12px' }}>
+                          {l.voucherNo ? <b>#{l.voucherNo}</b> : '---'}
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <span style={{ fontWeight: '800', color: '#059669', background: '#ecfdf5', padding: '2px 8px', borderRadius: '4px' }}>
+                            +{l.addedQuantity} {l.unit || 'টি'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px', fontWeight: '700', color: '#334155' }}>
+                          {formatCurrency(l.purchaseCostPrice || 0)}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: '900', color: '#2563eb' }}>
+                          {formatCurrency(batchCost)}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'right', fontWeight: '700', color: '#059669' }}>
+                          {formatCurrency(l.newAverageCostPrice || l.purchaseCostPrice || 0)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {searchedPurchases.length === 0 && (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>
+                        <div>📦 নির্বাচিত সময়কালে কোনো নতুন পণ্য ক্রয় বা রিস্টক রেকর্ড পাওয়া যায়নি।</div>
+                        <div style={{ fontSize: '12px', marginTop: '6px' }}>
+                          পণ্য ক্রয় লিপিবদ্ধ করতে <b>"পণ্য ও ইনভেন্টরি"</b> পেজ থেকে যে কোনো পণ্যের <b>"রিস্টক"</b> বাটনে চাপুন।
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* -------------------------------------------------------------------------
+            TAB 3: COGS PRODUCT BREAKDOWN (Products Sold & Their Cost of Goods)
+        ------------------------------------------------------------------------- */}
+        {activeLedgerTab === 'cogs' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+              <span style={{ fontSize: '13px', color: '#64748b' }}>
+                নির্বাচিত সময়কালে যে যে পণ্য বিক্রয় হয়ে ক্রয় খরচ (COGS = {formatCurrency(liveCostOfGoods)}) তৈরি করেছে:
+              </span>
+              <span style={{ fontSize: '13px', fontWeight: '700', color: '#059669' }}>
+                বিক্রীত আইটেমের মোট লাভ: {formatCurrency(liveNetRevenue - liveCostOfGoods)}
+              </span>
+            </div>
+
+            <div className="table-responsive">
+              <table className="pos-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                    <th style={{ padding: '10px' }}>পণ্যের নাম</th>
+                    <th style={{ padding: '10px' }}>বিক্রিত পরিমাণ</th>
+                    <th style={{ padding: '10px' }}>গড় ক্রয়মূল্য</th>
+                    <th style={{ padding: '10px' }}>মোট ক্রয় খরচ (COGS)</th>
+                    <th style={{ padding: '10px' }}>মোট বিক্রয় মূল্য</th>
+                    <th style={{ padding: '10px', textAlign: 'right' }}>গ্রস মুনাফা (লাভ)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cogsList.map((item, idx) => {
+                    const itemProfit = item.totalSales - item.totalCost;
+                    const margin = item.totalSales > 0 ? Math.round((itemProfit / item.totalSales) * 100) : 0;
+
+                    return (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '10px' }}>
+                          <span style={{ fontWeight: '800', color: '#0f172a' }}>{item.name}</span>
+                          {item.nameBn && <div style={{ fontSize: '11px', color: '#64748b' }}>{item.nameBn}</div>}
+                        </td>
+                        <td style={{ padding: '10px', fontWeight: '700' }}>
+                          {item.quantity} {item.unit}
+                        </td>
+                        <td style={{ padding: '10px', color: '#475569' }}>
+                          {formatCurrency(item.costPrice)}
+                        </td>
+                        <td style={{ padding: '10px', fontWeight: '800', color: '#dc2626' }}>
+                          {formatCurrency(item.totalCost)}
+                        </td>
+                        <td style={{ padding: '10px', fontWeight: '800', color: '#2563eb' }}>
+                          {formatCurrency(item.totalSales)}
+                        </td>
+                        <td style={{ padding: '10px', textAlign: 'right' }}>
+                          <span style={{ fontWeight: '900', color: itemProfit >= 0 ? '#059669' : '#dc2626' }}>
+                            {formatCurrency(itemProfit)}
+                          </span>
+                          <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '6px' }}>
+                            ({margin}%)
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {cogsList.length === 0 && (
+                    <tr>
+                      <td colSpan="6" style={{ textAlign: 'center', padding: '36px', color: '#94a3b8' }}>
+                        নির্বাচিত সময়ে কোনো বিক্রিত পণ্যের হিসাব নেই
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Archived Yearly Ledgers Table */}
       {archivedSummaries.length > 0 && (
-        <div style={{ marginTop: '24px', background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
+        <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '24px' }}>
           <h3 style={{ fontSize: '15px', fontWeight: '800', marginBottom: '4px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <MdArchive color="#ea580c" size={20} /> বিগত বছরসমূহের স্থায়ী লেজার সামারি (Archived Yearly Ledgers)
           </h3>
@@ -448,11 +951,11 @@ const AccountsDashboard = () => {
                     <td style={{ padding: '10px 12px', fontWeight: '800', color: '#0f172a' }}>{s.year} সাল</td>
                     <td style={{ padding: '10px 12px', color: '#64748b' }}>{s.totalInvoices} টি</td>
                     <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>{formatCurrency(s.grossRevenue)}</td>
-                    <td style={{ padding: '10px 12px', color: '#dc2626' }}>{formatCurrency(s.totalReturns)}</td>
-                    <td style={{ padding: '10px 12px', fontWeight: '700', color: '#059669' }}>{formatCurrency(s.netRevenue)}</td>
+                    <td style={{ padding: '10px 12px', color: '#dc2626' }}>- {formatCurrency(s.totalReturns)}</td>
+                    <td style={{ padding: '10px 12px', fontWeight: '800', color: '#059669' }}>{formatCurrency(s.netRevenue)}</td>
                     <td style={{ padding: '10px 12px', color: '#475569' }}>{formatCurrency(s.totalCostOfGoods)}</td>
                     <td style={{ padding: '10px 12px', color: '#dc2626' }}>{formatCurrency(s.totalExpenses)}</td>
-                    <td style={{ padding: '10px 12px', fontWeight: '800', color: (Number(s.netProfit) || 0) >= 0 ? '#059669' : '#dc2626' }}>
+                    <td style={{ padding: '10px 12px', fontWeight: '800', color: (s.netProfit || 0) >= 0 ? '#059669' : '#dc2626' }}>
                       {formatCurrency(s.netProfit)}
                     </td>
                   </tr>
@@ -462,53 +965,6 @@ const AccountsDashboard = () => {
           </div>
         </div>
       )}
-
-      {/* Visual Analysis Chart */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-        gap: '16px'
-      }}>
-        {/* Comparison Bar */}
-        <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '14px', color: '#0f172a' }}>
-            আয়, রিটার্ন, খরচ ও মুনাফা তুলনা ({timeRange === 'today' ? 'আজকের' : timeRange === 'month' ? 'চলতি মাস' : timeRange === 'year' ? 'চলতি বছর' : 'সর্বমোট'})
-          </h3>
-          <div style={{ height: '240px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={barChartData}>
-                <XAxis dataKey="name" fontSize={11} />
-                <YAxis fontSize={11} />
-                <Tooltip formatter={(value) => formatCurrency(value)} />
-                <Bar dataKey="amount" fill="#2563eb" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Payment Methods Pie */}
-        <div style={{ background: '#ffffff', padding: '20px', borderRadius: '14px', border: '1px solid #e2e8f0' }}>
-          <h3 style={{ fontSize: '15px', fontWeight: '700', marginBottom: '14px', color: '#0f172a' }}>
-            পেমেন্ট মাধ্যম অনুপাত ({timeRange === 'today' ? 'আজকের' : timeRange === 'month' ? 'চলতি মাস' : timeRange === 'year' ? 'চলতি বছর' : 'সর্বমোট'})
-          </h3>
-          <div style={{ height: '200px' }}>
-            {pieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value">
-                    {pieData.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value) => formatCurrency(value)} />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: '#94a3b8' }}>তথ্য নেই</div>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
