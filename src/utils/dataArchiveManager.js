@@ -196,16 +196,18 @@ export async function archiveAndPurgeSales({
   const backupFileName = `MahinPOS_Archive_Sales_${resolvedYear}_${new Date().toISOString().slice(0, 10)}.json`;
   const archivePayload = {
     platform: 'MahinPOS',
-    archiveType: 'Sales_Purge_Archive',
+    archiveType: 'Sales_And_Expenses_Purge_Archive',
     shopId,
     year: resolvedYear,
     totalRecords: salesToArchive.length,
+    totalExpensesCount: expensesToArchive.length,
     financialSummary: financialRollup,
-    invoices: salesToArchive
+    invoices: salesToArchive,
+    expenses: expensesToArchive
   };
   downloadArchiveFile(archivePayload, backupFileName);
 
-  if (onProgress) onProgress(`ফায়ারবেস থেকে ${salesToArchive.length} টি ডকুমেন্ট ব্যাচ ডিলেট করা হচ্ছে...`);
+  if (onProgress) onProgress(`ফায়ারবেস থেকে ${salesToArchive.length} টি ইনভয়েস ও ${expensesToArchive.length} টি খরচ ব্যাচ ডিলেট করা হচ্ছে...`);
 
   // 6. Delete raw documents in batches of 400 (Firestore limit is 500 per batch)
   const batchSize = 400;
@@ -216,7 +218,17 @@ export async function archiveAndPurgeSales({
       batch.delete(doc(db, 'shops', shopId, 'sales', s.id));
     });
     await batch.commit();
-    if (onProgress) onProgress(`${Math.min(i + batchSize, salesToArchive.length)} / ${salesToArchive.length} টি সম্পন্ন...`);
+    if (onProgress) onProgress(`${Math.min(i + batchSize, salesToArchive.length)} / ${salesToArchive.length} টি ইনভয়েস সম্পন্ন...`);
+  }
+
+  // Delete raw expenses in batches as well to free database
+  for (let i = 0; i < expensesToArchive.length; i += batchSize) {
+    const chunk = expensesToArchive.slice(i, i + batchSize);
+    const batch = writeBatch(db);
+    chunk.forEach((e) => {
+      batch.delete(doc(db, 'shops', shopId, 'expenses', e.id));
+    });
+    await batch.commit();
   }
 
   return {
