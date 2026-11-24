@@ -10,7 +10,9 @@ import {
   serverTimestamp,
   getDoc
 } from 'firebase/firestore';
-import { db } from '../../firebase/config';
+import { createUserWithEmailAndPassword, sendPasswordResetEmail, signOut, getAuth } from 'firebase/auth';
+import { initializeApp, getApps } from 'firebase/app';
+import { db, primaryFirebaseConfig, defaultAuth } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
@@ -47,7 +49,9 @@ import {
   MdCloudDownload,
   MdBackup,
   MdOutlineCloudDone,
-  MdConfirmationNumber
+  MdConfirmationNumber,
+  MdVpnKey,
+  MdContentCopy
 } from 'react-icons/md';
 
 const SuperAdminDashboard = () => {
@@ -73,6 +77,7 @@ const SuperAdminDashboard = () => {
   const [shopCode, setShopCode] = useState('');
   const [shopName, setShopName] = useState('');
   const [ownerEmail, setOwnerEmail] = useState('');
+  const [ownerPassword, setOwnerPassword] = useState('12345678');
   const [phone, setPhone] = useState('');
   const [packageTier, setPackageTier] = useState('Pro');
   const [maxProducts, setMaxProducts] = useState(1000);
@@ -107,6 +112,12 @@ const SuperAdminDashboard = () => {
   const [smsNewBalance, setSmsNewBalance] = useState(0);
   const [smsNewStatus, setSmsNewStatus] = useState('Active');
   const [updatingSms, setUpdatingSms] = useState(false);
+
+  // Password Management Modal State
+  const [passwordModalShop, setPasswordModalShop] = useState(null);
+  const [adminNewPassword, setAdminNewPassword] = useState('12345678');
+  const [sendingResetLink, setSendingResetLink] = useState(false);
+  const [settingNewPassword, setSettingNewPassword] = useState(false);
 
   // Dedicated DB Config Form
   const [selectedShopForDb, setSelectedShopForDb] = useState('');
@@ -196,11 +207,13 @@ const SuperAdminDashboard = () => {
 
     setSubmitting(true);
     try {
+      const defaultPass = (ownerPassword || '12345678').trim();
       const shopData = {
         shopName: shopName.trim(),
         name: shopName.trim(),
         ownerEmail: ownerEmail.trim(),
         phone: phone.trim(),
+        tempPassword: defaultPass,
         packageTier,
         maxProducts: Number(maxProducts) || 1000,
         databaseType,
@@ -211,6 +224,17 @@ const SuperAdminDashboard = () => {
       };
 
       await setDoc(doc(db, 'shops', cleanId), shopData);
+
+      // Create Firebase Auth user using secondary app so Super Admin is NOT logged out
+      try {
+        const secondaryApp = getApps().find(a => a.name === 'SecondaryCreatorApp') || 
+                             initializeApp(primaryFirebaseConfig, 'SecondaryCreatorApp');
+        const secondaryAuth = getAuth(secondaryApp);
+        await createUserWithEmailAndPassword(secondaryAuth, ownerEmail.trim(), defaultPass);
+        await signOut(secondaryAuth);
+      } catch (authErr) {
+        console.warn("[SuperAdmin] Auth account creation note:", authErr.code);
+      }
 
       // Create initial settings profile for tenant
       try {
@@ -228,11 +252,12 @@ const SuperAdminDashboard = () => {
         console.warn("Profile init note:", e);
       }
 
-      toast.success(`নতুন দোকান "${shopName}" সফলভাবে তৈরি হয়েছে!`);
+      toast.success(`নতুন দোকান "${shopName}" সফলভাবে তৈরি হয়েছে! পাসওয়ার্ড: ${defaultPass}`);
       setIsAddModalOpen(false);
       setShopCode('');
       setShopName('');
       setOwnerEmail('');
+      setOwnerPassword('12345678');
       setPhone('');
     } catch (err) {
       console.error("Create shop error:", err);
@@ -243,6 +268,85 @@ const SuperAdminDashboard = () => {
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Open Password Modal
+  const openPasswordModal = (shop) => {
+    setPasswordModalShop(shop);
+    setAdminNewPassword(shop.tempPassword || '12345678');
+  };
+
+  // 1-Click Send Reset Link via Email
+  const handleAdminSendResetEmail = async (shop) => {
+    const targetEmail = shop?.ownerEmail?.trim();
+    if (!targetEmail) {
+      toast.error('দোকানের কোনো মালিক ইমেইল পাওয়া যায়নি');
+      return;
+    }
+    setSendingResetLink(true);
+    try {
+      await sendPasswordResetEmail(defaultAuth, targetEmail);
+      toast.success(`পাসওয়ার্ড রিসেট লিঙ্ক সফলভাবে "${targetEmail}" ঠিকানায় পাঠানো হয়েছে!`, { duration: 6000 });
+    } catch (err) {
+      console.error("Admin send reset link error:", err);
+      if (err.code === 'auth/user-not-found') {
+        toast.error('Firebase Auth-এ এই ইমেইলে কোনো অ্যাকাউন্ট পাওয়া যায়নি। অনুগ্রহ করে নিচে "নতুন পাসওয়ার্ড দিয়ে একাউন্ট তৈরি/সেট করুন" অপশনটি ব্যবহার করুন।', { duration: 8000 });
+      } else {
+        toast.error(err.message || 'পাসওয়ার্ড রিসেট লিঙ্ক পাঠাতে ব্যর্থ হয়েছে');
+      }
+    } finally {
+      setSendingResetLink(false);
+    }
+  };
+
+  // Direct Set / Create Password
+  const handleAdminSetNewPassword = async (e) => {
+    e.preventDefault();
+    if (!passwordModalShop || !adminNewPassword) return;
+    const cleanPass = adminNewPassword.trim();
+    if (cleanPass.length < 6) {
+      toast.error('পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে');
+      return;
+    }
+
+    setSettingNewPassword(true);
+    const targetEmail = passwordModalShop.ownerEmail?.trim();
+    try {
+      let created = false;
+      try {
+        const secondaryApp = getApps().find(a => a.name === 'SecondaryCreatorApp') || 
+                             initializeApp(primaryFirebaseConfig, 'SecondaryCreatorApp');
+        const secondaryAuth = getAuth(secondaryApp);
+        await createUserWithEmailAndPassword(secondaryAuth, targetEmail, cleanPass);
+        await signOut(secondaryAuth);
+        created = true;
+      } catch (authErr) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          try {
+            await sendPasswordResetEmail(defaultAuth, targetEmail);
+          } catch (rErr) {}
+        } else {
+          console.warn("Secondary auth creation note:", authErr.code);
+        }
+      }
+
+      await updateDoc(doc(db, 'shops', passwordModalShop.id), {
+        tempPassword: cleanPass,
+        lastPasswordResetAt: serverTimestamp()
+      });
+
+      if (created) {
+        toast.success(`ক্লায়েন্টের নতুন Firebase Auth একাউন্ট তৈরি ও পাসওয়ার্ড "${cleanPass}" সফলভাবে সেট হয়েছে!`, { duration: 6000 });
+      } else {
+        toast.success(`পাসওয়ার্ড রিসেট লিঙ্ক "${targetEmail}"-এ পাঠানো হয়েছে এবং সাময়িক পাসওয়ার্ড সেভ হয়েছে!`, { duration: 6000 });
+      }
+      setPasswordModalShop(null);
+    } catch (err) {
+      console.error("Admin set password error:", err);
+      toast.error(err.message || 'পাসওয়ার্ড সেট করতে ব্যর্থ হয়েছে');
+    } finally {
+      setSettingNewPassword(false);
     }
   };
 
@@ -795,6 +899,25 @@ const SuperAdminDashboard = () => {
                 </td>
                 <td style={{ padding: '12px 10px', textAlign: 'center' }}>
                   <div style={{ display: 'inline-flex', gap: '6px' }}>
+                    <button
+                      onClick={() => openPasswordModal(s)}
+                      title="ক্লায়েন্ট পাসওয়ার্ড রিসেট ও সেটআপ"
+                      style={{
+                        padding: '5px 9px',
+                        borderRadius: '5px',
+                        border: '1px solid #fed7aa',
+                        background: '#fff7ed',
+                        color: '#ea580c',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px'
+                      }}
+                    >
+                      <MdVpnKey size={13} /> পাসওয়ার্ড
+                    </button>
                     <button
                       onClick={() => toggleShopStatus(s)}
                       title={s.status === 'Suspended' ? 'সক্রিয় করুন' : 'স্থগিত করুন'}
@@ -1668,6 +1791,21 @@ const SuperAdminDashboard = () => {
 
               <div>
                 <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px', color: '#334155' }}>
+                  লগইন পাসওয়ার্ড (Password) *
+                </label>
+                <input
+                  type="text"
+                  value={ownerPassword}
+                  onChange={(e) => setOwnerPassword(e.target.value)}
+                  placeholder="যেমন: 12345678"
+                  required
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px' }}
+                />
+                <span style={{ fontSize: '11px', color: '#64748b' }}>এই পাসওয়ার্ড দিয়ে ক্লায়েন্ট লগইন করবেন (কমপক্ষে ৬ অক্ষর)</span>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', marginBottom: '4px', color: '#334155' }}>
                   মোবাইল নম্বর
                 </label>
                 <input
@@ -1732,6 +1870,212 @@ const SuperAdminDashboard = () => {
                   }}
                 >
                   {submitting ? 'অনবোর্ড হচ্ছে...' : 'অনবোর্ড নিশ্চিত করুন'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Password Management & Reset Modal */}
+      {passwordModalShop && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.65)',
+          backdropFilter: 'blur(4px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: '16px',
+            width: '100%',
+            maxWidth: '520px',
+            padding: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+            border: '1px solid #e2e8f0'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ background: '#ffedd5', color: '#ea580c', padding: '6px', borderRadius: '8px', display: 'flex' }}>
+                  <MdVpnKey size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '17px', fontWeight: '800', margin: 0, color: '#0f172a' }}>
+                    ক্লায়েন্ট পাসওয়ার্ড নিয়ন্ত্রণ ও রিসেট
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                    দোকান: <b>{passwordModalShop.shopName || passwordModalShop.name}</b> (ID: {passwordModalShop.id})
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPasswordModalShop(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <MdClose size={22} />
+              </button>
+            </div>
+
+            {/* Client Info Card */}
+            <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '18px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '13px' }}>
+                <span style={{ color: '#64748b' }}>মালিকের ইমেইল:</span>
+                <span style={{ fontWeight: '700', color: '#0f172a' }}>{passwordModalShop.ownerEmail}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                <span style={{ color: '#64748b' }}>সেট করা পাসওয়ার্ড:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <code style={{ background: '#e2e8f0', padding: '2px 8px', borderRadius: '4px', fontWeight: '700', color: '#0f172a' }}>
+                    {passwordModalShop.tempPassword || 'সেট করা নেই'}
+                  </code>
+                  {passwordModalShop.tempPassword && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(passwordModalShop.tempPassword);
+                        toast.success('পাসওয়ার্ড কপি করা হয়েছে!');
+                      }}
+                      title="কপি করুন"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#2563eb', padding: '2px' }}
+                    >
+                      <MdContentCopy size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Option 1: 1-Click Send Reset Link via Email */}
+            <div style={{ border: '1px solid #e0e7ff', background: '#eef2ff', padding: '16px', borderRadius: '10px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                <MdSend color="#4f46e5" size={18} />
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#312e81' }}>
+                  পদ্ধতি ১: ইমেইলে পাসওয়ার্ড রিসেট লিঙ্ক পাঠান
+                </h4>
+              </div>
+              <p style={{ margin: '0 0 12px 0', fontSize: '12px', color: '#4338ca', lineHeight: '1.4' }}>
+                ক্লায়েন্টের ইমেইলে একটি অফিসিয়াল পাসওয়ার্ড রিসেট লিঙ্ক যাবে। সেখানে ক্লিক করে ক্লায়েন্ট নিজের ইচ্ছেমতো নতুন পাসওয়ার্ড সেট করতে পারবেন।
+              </p>
+              <button
+                type="button"
+                onClick={() => handleAdminSendResetEmail(passwordModalShop)}
+                disabled={sendingResetLink}
+                style={{
+                  width: '100%',
+                  padding: '9px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#4f46e5',
+                  color: '#fff',
+                  fontWeight: '700',
+                  fontSize: '13px',
+                  cursor: sendingResetLink ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {sendingResetLink ? 'পাঠানো হচ্ছে...' : '📩 ইমেইলে পাসওয়ার্ড রিসেট লিঙ্ক পাঠান'}
+              </button>
+            </div>
+
+            {/* Option 2: Direct Set / Create Password */}
+            <form onSubmit={handleAdminSetNewPassword} style={{ border: '1px solid #fed7aa', background: '#fffbeb', padding: '16px', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                <MdVpnKey color="#d97706" size={18} />
+                <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '700', color: '#78350f' }}>
+                  পদ্ধতি ২: সরাসরি নতুন পাসওয়ার্ড দিয়ে একাউন্ট সক্রিয় / আপডেট করুন
+                </h4>
+              </div>
+              <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#92400e', lineHeight: '1.4' }}>
+                ক্লায়েন্ট যদি একাউন্ট তৈরি করতে না পারে বা পাসওয়ার্ড ভুলে যায়, সরাসরি একটি পাসওয়ার্ড দিয়ে একাউন্ট সক্রিয় বা পাসওয়ার্ড আপডেট করে দিন।
+              </p>
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', marginBottom: '4px', color: '#78350f' }}>
+                  নতুন পাসওয়ার্ড (Password)
+                </label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={adminNewPassword}
+                    onChange={(e) => setAdminNewPassword(e.target.value)}
+                    placeholder="কমপক্ষে ৬ অক্ষরের পাসওয়ার্ড"
+                    required
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #d97706',
+                      background: '#fff',
+                      fontSize: '13px'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const rand = Math.floor(10000000 + Math.random() * 90000000).toString();
+                      setAdminNewPassword(rand);
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: '#fff',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🎲 র‍্যান্ডম
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="submit"
+                  disabled={settingNewPassword}
+                  style={{
+                    flex: 1,
+                    padding: '9px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: '#d97706',
+                    color: '#fff',
+                    fontWeight: '700',
+                    fontSize: '13px',
+                    cursor: settingNewPassword ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {settingNewPassword ? 'সেভ হচ্ছে...' : '💾 পাসওয়ার্ড সেট ও একাউন্ট সক্রিয় করুন'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = `দোকানের লগইন তথ্য:\nওয়েবসাইট: https://mahinpos.pages.dev/poserp\nইমেইল: ${passwordModalShop.ownerEmail}\nপাসওয়ার্ড: ${adminNewPassword}`;
+                    navigator.clipboard.writeText(text);
+                    toast.success('ক্লায়েন্টের লগইন তথ্য ক্লিপবোর্ডে কপি করা হয়েছে!');
+                  }}
+                  title="লগইন তথ্য কপি করুন"
+                  style={{
+                    padding: '9px 14px',
+                    borderRadius: '6px',
+                    border: '1px solid #d97706',
+                    background: '#fff',
+                    color: '#b45309',
+                    fontWeight: '700',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <MdContentCopy size={15} /> কপি
                 </button>
               </div>
             </form>

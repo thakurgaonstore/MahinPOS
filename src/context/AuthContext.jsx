@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { toast } from 'react-hot-toast';
 import { 
   signInWithEmailAndPassword, 
   signOut, 
@@ -63,6 +64,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('impersonationSession_pos');
     localStorage.removeItem('staffAuth_pos');
     localStorage.removeItem('adminProfile_pos');
+    localStorage.setItem('mahinpos_last_active_time', String(Date.now()));
     const cred = await signInWithEmailAndPassword(auth, email, password);
     const superAdminEmails = [
       'admin@mahinpos.com', 
@@ -169,6 +171,7 @@ export const AuthProvider = ({ children }) => {
 
       localStorage.setItem('staffAuth_pos', JSON.stringify({ staffUser, staffProfile }));
       localStorage.setItem('lastShopId_pos', cleanShopCode);
+      localStorage.setItem('mahinpos_last_active_time', String(Date.now()));
 
       setCurrentUser(staffUser);
       setUserProfile(staffProfile);
@@ -228,11 +231,63 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('impersonationSession_pos');
     localStorage.removeItem('staffAuth_pos');
     localStorage.removeItem('adminProfile_pos');
+    localStorage.removeItem('mahinpos_last_active_time');
     resetActiveTenantDb();
     setCurrentUser(null);
     setUserProfile(null);
     return signOut(auth);
   };
+
+  // 60-Minute Inactivity Auto-Logout Timer for both Client Admin/Staff & Super Admin
+  useEffect(() => {
+    if (!currentUser && !userProfile) return;
+
+    const INACTIVITY_LIMIT_MS = 60 * 60 * 1000; // 60 minutes
+    const STORAGE_KEY = 'mahinpos_last_active_time';
+
+    const updateActivityTime = () => {
+      localStorage.setItem(STORAGE_KEY, String(Date.now()));
+    };
+
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      updateActivityTime();
+    }
+
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+    let lastThrottledTime = 0;
+
+    const onUserActivity = () => {
+      const now = Date.now();
+      if (now - lastThrottledTime > 5000) {
+        lastThrottledTime = now;
+        localStorage.setItem(STORAGE_KEY, String(now));
+      }
+    };
+
+    events.forEach((evt) => {
+      window.addEventListener(evt, onUserActivity, { passive: true });
+    });
+
+    const checkInterval = setInterval(() => {
+      const now = Date.now();
+      const lastActive = Number(localStorage.getItem(STORAGE_KEY)) || now;
+      if (now - lastActive >= INACTIVITY_LIMIT_MS) {
+        console.warn("[AuthContext] 60 minutes of inactivity reached. Logging out...");
+        logout();
+        toast.error('নিষ্ক্রিয়তার কারণে ৬০ মিনিট পর স্বয়ংক্রিয়ভাবে লগআউট করা হয়েছে। অনুগ্রহ করে আবার লগইন করুন।', {
+          id: 'session-inactivity-logout',
+          duration: 8000
+        });
+      }
+    }, 30000);
+
+    return () => {
+      events.forEach((evt) => {
+        window.removeEventListener(evt, onUserActivity);
+      });
+      clearInterval(checkInterval);
+    };
+  }, [currentUser, userProfile]);
 
   // Listen for Firebase Auth state changes
   useEffect(() => {

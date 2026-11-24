@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
+import { sendPasswordResetEmail } from 'firebase/auth';
+import { auth } from '../firebase/config';
 import {
   MdPointOfSale,
   MdLock,
@@ -11,7 +13,10 @@ import {
   MdVisibilityOff,
   MdStorefront,
   MdPerson,
-  MdAdminPanelSettings
+  MdAdminPanelSettings,
+  MdLockReset,
+  MdClose,
+  MdCheckCircle
 } from 'react-icons/md';
 
 const Login = () => {
@@ -32,6 +37,39 @@ const Login = () => {
 
   const [loading, setLoading] = useState(false);
 
+  // Forgot password modal state
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [sendingReset, setSendingReset] = useState(false);
+  const [resetSentSuccess, setResetSentSuccess] = useState(false);
+
+  const handleSendResetEmail = async (e) => {
+    e.preventDefault();
+    const cleanEmail = (resetEmail || '').trim();
+    if (!cleanEmail) {
+      toast.error('অনুগ্রহ করে আপনার নিবন্ধিত ইমেইল ঠিকানা প্রদান করুন');
+      return;
+    }
+
+    setSendingReset(true);
+    try {
+      await sendPasswordResetEmail(auth, cleanEmail);
+      setResetSentSuccess(true);
+      toast.success('পাসওয়ার্ড রিসেট লিঙ্ক আপনার ইমেইলে পাঠানো হয়েছে!', { duration: 6000 });
+    } catch (err) {
+      console.error("Password reset error:", err);
+      if (err.code === 'auth/user-not-found') {
+        toast.error('এই ইমেইলে কোনো অ্যাকাউন্ট পাওয়া যায়নি। সুপার এডমিনের সাথে যোগাযোগ করুন।', { duration: 6000 });
+      } else if (err.code === 'auth/invalid-email') {
+        toast.error('সঠিক ইমেইল ঠিকানা প্রদান করুন');
+      } else {
+        toast.error(err.message || 'রিসেট লিঙ্ক পাঠাতে ব্যর্থ হয়েছে');
+      }
+    } finally {
+      setSendingReset(false);
+    }
+  };
+
   const handleOwnerOrSuperAdminLogin = async (e) => {
     e.preventDefault();
     if (!email || !password) {
@@ -50,7 +88,11 @@ const Login = () => {
       }
     } catch (err) {
       console.error("Login error:", err);
-      toast.error(err.message || 'ভুল ইমেইল বা পাসওয়ার্ড!');
+      if (err.code === 'auth/invalid-credential' || err.message?.includes('invalid-credential')) {
+        toast.error('ভুল ইমেইল বা পাসওয়ার্ড! আপনি কি পাসওয়ার্ড ভুলে গেছেন? নিচে "পাসওয়ার্ড ভুলে গেছেন?" লিঙ্কে ক্লিক করুন।', { duration: 6000 });
+      } else {
+        toast.error(err.message || 'ভুল ইমেইল বা পাসওয়ার্ড!');
+      }
     } finally {
       setLoading(false);
     }
@@ -244,6 +286,29 @@ const Login = () => {
               </div>
             </div>
 
+            {/* Forgot password link */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-6px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setResetEmail(email.trim());
+                  setResetSentSuccess(false);
+                  setShowForgotPassword(true);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#38bdf8',
+                  fontSize: '12.5px',
+                  cursor: 'pointer',
+                  padding: '2px 0',
+                  textDecoration: 'underline'
+                }}
+              >
+                পাসওয়ার্ড ভুলে গেছেন? (Forgot Password)
+              </button>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -353,6 +418,13 @@ const Login = () => {
               </div>
             </div>
 
+            {/* Staff note */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-6px' }}>
+              <span style={{ color: '#94a3b8', fontSize: '11.5px' }}>
+                পাসওয়ার্ড ভুলে গেলে দোকান অ্যাডমিনের সাথে যোগাযোগ করুন
+              </span>
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -381,6 +453,144 @@ const Login = () => {
           </Link>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.75)',
+          backdropFilter: 'blur(5px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{
+            width: '100%',
+            maxWidth: '430px',
+            background: '#0f172a',
+            border: '1px solid #334155',
+            borderRadius: '16px',
+            padding: '28px 24px',
+            color: '#fff',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <MdLockReset size={24} color="#38bdf8" />
+                <h3 style={{ fontSize: '18px', fontWeight: '700', margin: 0 }}>পাসওয়ার্ড রিসেট</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+              >
+                <MdClose size={22} />
+              </button>
+            </div>
+
+            {resetSentSuccess ? (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <MdCheckCircle size={48} color="#10b981" style={{ margin: '0 auto 12px' }} />
+                <h4 style={{ fontSize: '16px', fontWeight: '700', color: '#10b981', marginBottom: '8px' }}>
+                  রিসেট লিঙ্ক পাঠানো হয়েছে!
+                </h4>
+                <p style={{ fontSize: '13px', color: '#cbd5e1', lineHeight: '1.6', marginBottom: '20px' }}>
+                  <b>{resetEmail}</b> ঠিকানায় পাসওয়ার্ড পরিবর্তনের অফিসিয়াল লিঙ্ক পাঠানো হয়েছে। অনুগ্রহ করে আপনার ইনবক্স অথবা স্প্যাম ফোল্ডার চেক করে নতুন পাসওয়ার্ড সেট করে নিন।
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotPassword(false)}
+                  style={{
+                    width: '100%',
+                    padding: '11px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#2563eb',
+                    color: '#fff',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  লগইন পেজে ফিরে যান
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleSendResetEmail} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: '1.5', margin: 0 }}>
+                  আপনার একাউন্টে নিবন্ধিত ইমেইল ঠিকানা দিন। আমরা পাসওয়ার্ড রিসেট করার একটি নিরাপদ লিঙ্ক পাঠিয়ে দেব।
+                </p>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#cbd5e1', marginBottom: '6px' }}>
+                    নিবন্ধিত ইমেইল (Email)
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <MdEmail size={18} style={{ position: 'absolute', left: '12px', top: '12px', color: '#64748b' }} />
+                    <input
+                      type="email"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="owner@example.com"
+                      required
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px 10px 40px',
+                        borderRadius: '8px',
+                        border: '1px solid #334155',
+                        background: '#1e293b',
+                        color: '#ffffff',
+                        fontSize: '14px',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(false)}
+                    style={{
+                      flex: 1,
+                      padding: '10px',
+                      borderRadius: '8px',
+                      border: '1px solid #334155',
+                      background: '#1e293b',
+                      color: '#94a3b8',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      fontSize: '13px'
+                    }}
+                  >
+                    বাতিল
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={sendingReset}
+                    style={{
+                      flex: 2,
+                      padding: '10px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: '#2563eb',
+                      color: '#fff',
+                      fontWeight: '700',
+                      cursor: sendingReset ? 'not-allowed' : 'pointer',
+                      fontSize: '13px'
+                    }}
+                  >
+                    {sendingReset ? 'পাঠানো হচ্ছে...' : 'রিসেট লিঙ্ক পাঠান'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
