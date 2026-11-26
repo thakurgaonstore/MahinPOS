@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters';
 import { Link } from 'react-router-dom';
 import InvoiceViewModal from './invoices/InvoiceViewModal';
+import AccountBalancesCardGrid from '../components/accounts/AccountBalancesCardGrid';
 
 import {
   MdPointOfSale,
@@ -164,6 +165,21 @@ const DashboardHome = () => {
     const minAlert = Number(p.minStockAlert) || 5;
     return stock <= minAlert;
   }).length;
+
+  // 1.1 Total Stock Valuation (সকল স্টকের মোট মূল্য ও কোয়ান্টিটি)
+  const totalStockCostValue = products.reduce((sum, p) => {
+    const qty = Math.max(0, Number(p.stock) || 0);
+    const cost = Number(p.costPrice) || 0;
+    return sum + (qty * cost);
+  }, 0);
+
+  const totalStockRetailValue = products.reduce((sum, p) => {
+    const qty = Math.max(0, Number(p.stock) || 0);
+    const price = Number(p.retailPrice) || 0;
+    return sum + (qty * price);
+  }, 0);
+
+  const totalStockQty = products.reduce((sum, p) => sum + Math.max(0, Number(p.stock) || 0), 0);
 
   // 2. Logged-in Staff Member Details & Incentive Calculation
   const loggedInStaff = staffList.find(s => 
@@ -644,14 +660,43 @@ const DashboardHome = () => {
             SECTION 2: OWNER & MANAGER FULL SHOP OVERVIEW
         ========================================================================= */
         <>
-          {/* Owner Shop KPI Stats - 6 Responsive Cards */}
+          {/* Multi-Account Balances Grid (Cash, Bank, bKash, Nagad, Agent Bank, Flexiload, Total Balance) */}
+          <AccountBalancesCardGrid
+            shopId={shopId}
+            userProfile={userProfile}
+            isOwner={isOwner}
+          />
+
+          {/* Owner Shop KPI Stats */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
             gap: '16px',
             marginBottom: '24px'
           }}>
-            {/* 1. Today Sales */}
+            {/* 1. Total Stock Valuation (সকল স্টকের মোট ক্রয়মূল্য ও বিক্রয়মূল্য) */}
+            <Link to="/dashboard/inventory" style={{ textDecoration: 'none' }}>
+              <div style={{
+                background: '#ffffff',
+                padding: '20px',
+                borderRadius: '14px',
+                border: '1px solid #fed7aa',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '13px', color: '#c2410c', fontWeight: '800' }}>সকল স্টকের মোট মূল্য (ক্রয়)</span>
+                  <div style={{ background: '#ffedd5', padding: '8px', borderRadius: '10px', color: '#ea580c' }}><MdInventory2 size={20} /></div>
+                </div>
+                <div style={{ fontSize: '26px', fontWeight: '900', color: '#c2410c' }}>{formatCurrency(totalStockCostValue)}</div>
+                <span style={{ fontSize: '12px', color: '#475569' }}>
+                  সম্ভাব্য বিক্রয়: <b style={{ color: '#059669' }}>{formatCurrency(totalStockRetailValue)}</b> ({totalStockQty} টি পণ্য)
+                </span>
+              </div>
+            </Link>
+
+            {/* 2. Today Sales */}
             <Link to="/dashboard/sales" style={{ textDecoration: 'none' }}>
               <div style={{
                 background: '#ffffff',

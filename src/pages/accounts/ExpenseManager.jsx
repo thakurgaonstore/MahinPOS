@@ -25,6 +25,7 @@ import {
   MdFlashOn
 } from 'react-icons/md';
 import DataArchiveModal from '../settings/DataArchiveModal';
+import { debitAccountFromExpense, creditAccountFromSale, ACCOUNT_KEYS } from '../../utils/financialAccountsManager';
 
 const ExpenseManager = () => {
   const { userProfile } = useAuth();
@@ -36,6 +37,7 @@ const ExpenseManager = () => {
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('দোকান ভাড়া');
+  const [paymentAccount, setPaymentAccount] = useState('cash');
   const [note, setNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -137,16 +139,26 @@ const ExpenseManager = () => {
       return;
     }
 
+    const numAmount = Number(amount) || 0;
     setIsSubmitting(true);
     try {
       await addDoc(collection(db, 'shops', shopId, 'expenses'), {
         title: title.trim(),
-        amount: Number(amount) || 0,
+        amount: numAmount,
         category,
+        paymentAccount,
         note: note.trim(),
         recordedBy: userProfile?.name || 'Admin',
         createdAt: serverTimestamp()
       });
+
+      // Auto-debit the corresponding financial account balance
+      if (numAmount > 0) {
+        debitAccountFromExpense(shopId, paymentAccount, numAmount).catch((err) => {
+          console.warn("Auto-debit from account failed:", err);
+        });
+      }
+
       toast.success('খরচ সফলভাবে যুক্ত হয়েছে');
       setTitle('');
       setAmount('');
@@ -159,10 +171,13 @@ const ExpenseManager = () => {
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (id, expAmount, expAccount = 'cash') => {
     if (!window.confirm('এই খরচের এন্ট্রিটি মুছে ফেলতে চান?')) return;
     try {
       await deleteDoc(doc(db, 'shops', shopId, 'expenses', id));
+      if (expAmount) {
+        creditAccountFromSale(shopId, expAccount, expAmount).catch(() => {});
+      }
       toast.success('খরচ মুছে ফেলা হয়েছে');
     } catch (e) {
       toast.error('মুছতে সমস্যা হয়েছে');
@@ -252,6 +267,23 @@ const ExpenseManager = () => {
                 required
                 style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', fontSize: '13px', fontWeight: '700' }}
               />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#334155', marginBottom: '4px' }}>
+                টাকা পরিশোধের মাধ্যম / অ্যাকাউন্ট
+              </label>
+              <select
+                value={paymentAccount}
+                onChange={(e) => setPaymentAccount(e.target.value)}
+                style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1', outline: 'none', background: '#fff', fontSize: '13px', fontWeight: '700' }}
+              >
+                <option value="cash">💵 ক্যাশ (হাতে নগদ/ড্রয়ার)</option>
+                <option value="bank">🏦 ব্যাংক অ্যাকাউন্ট</option>
+                <option value="bkash">📱 বিকাশ (bKash)</option>
+                <option value="nagad">🟠 নগদ (Nagad)</option>
+                <option value="agent_bank">🏛️ এজেন্ট ব্যাংক</option>
+              </select>
             </div>
 
             <div>
@@ -397,6 +429,11 @@ const ExpenseManager = () => {
                       <span style={{ fontSize: '11px', background: '#f1f5f9', color: '#475569', padding: '3px 8px', borderRadius: '4px', fontWeight: '600' }}>
                         {e.category}
                       </span>
+                      {e.paymentAccount && e.paymentAccount !== 'cash' && (
+                        <span style={{ display: 'block', fontSize: '10px', color: '#2563eb', fontWeight: '700', marginTop: '2px' }}>
+                          পেমেন্ট: {ACCOUNT_KEYS[e.paymentAccount]?.shortName || e.paymentAccount}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: '10px', textAlign: 'right' }}>
                       <span style={{ fontWeight: '800', color: '#dc2626' }}>{formatCurrency(e.amount)}</span>
@@ -404,7 +441,7 @@ const ExpenseManager = () => {
                     <td style={{ padding: '10px', textAlign: 'center' }}>
                       <button
                         type="button"
-                        onClick={() => handleDelete(e.id)}
+                        onClick={() => handleDelete(e.id, Number(e.amount), e.paymentAccount || 'cash')}
                         title="এই খরচের এন্ট্রি মুছে ফেলুন"
                         style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px' }}
                       >

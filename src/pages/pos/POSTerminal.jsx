@@ -18,6 +18,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
 import QuickAddCustomerModal from '../../components/QuickAddCustomerModal';
 import InvoiceViewModal from '../invoices/InvoiceViewModal';
+import { creditAccountFromSale } from '../../utils/financialAccountsManager';
 
 // Icons
 import {
@@ -466,6 +467,13 @@ const POSTerminal = () => {
 
       // 1. Save Sale to Firestore
       const saleRef = await addDoc(collection(db, 'shops', shopId, 'sales'), saleData);
+
+      // 1.1 Auto-credit payment to financial accounts
+      if (actualPaid > 0) {
+        creditAccountFromSale(shopId, paymentMethod, actualPaid).catch((err) => {
+          console.warn("Auto-credit to financial account failed:", err);
+        });
+      }
 
       // 2. Decrement Products Stock
       for (const item of cart) {
@@ -1517,8 +1525,8 @@ const POSTerminal = () => {
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '8px' }}>
                 পেমেন্ট মেথড নির্বাচন করুন
               </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}>
-                {['Cash', 'bKash', 'Nagad', 'Card', 'Due'].map((method) => (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(75px, 1fr))', gap: '6px' }}>
+                {['Cash', 'bKash', 'Nagad', 'Card', 'Agent Bank', 'Due'].map((method) => (
                   <button
                     key={method}
                     type="button"
@@ -1540,7 +1548,7 @@ const POSTerminal = () => {
                       textAlign: 'center'
                     }}
                   >
-                    {method === 'Cash' ? 'নগদ' : method === 'Due' ? 'বাকি' : method}
+                    {method === 'Cash' ? 'নগদ' : method === 'Due' ? 'বাকি' : method === 'Card' ? 'কার্ড/ব্যাংক' : method === 'Agent Bank' ? 'এজেন্ট' : method}
                   </button>
                 ))}
               </div>

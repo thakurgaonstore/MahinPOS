@@ -91,6 +91,11 @@ const ProductList = () => {
   const totalPages = Math.ceil(filtered.length / perPage) || 1;
   const paginatedProducts = filtered.slice((page - 1) * perPage, page * perPage);
 
+  // Total Stock Valuation
+  const totalStockCostValue = products.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Math.max(0, Number(p.stock)) || 0)), 0);
+  const totalStockRetailValue = products.reduce((sum, p) => sum + ((Number(p.retailPrice) || 0) * (Math.max(0, Number(p.stock)) || 0)), 0);
+  const totalStockQty = products.reduce((sum, p) => sum + Math.max(0, Number(p.stock) || 0), 0);
+
   // Delete product
   const handleDelete = async (id, name) => {
     if (!window.confirm(`আপনি কি নিশ্চিত "${name}" পণ্যটি মুছে ফেলতে চান?`)) return;
@@ -373,9 +378,33 @@ const ProductList = () => {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '14px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: '800', color: '#0f172a', margin: 0 }}>পণ্য ও ইনভেন্টরি ম্যানেজমেন্ট</h1>
-          <p style={{ fontSize: '14px', color: '#64748b', margin: '4px 0 0 0' }}>
-            মোট পণ্য: <b>{products.length}</b> টি | ফিল্টারকৃত: <b>{filtered.length}</b> টি (ক্যাটাগরি ও লুজ পণ্য সমর্থন)
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '6px' }}>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>
+              মোট আইটেম: <b>{products.length}</b> টি | মজুদ কোয়ান্টিটি: <b>{totalStockQty}</b>
+            </span>
+            <span style={{
+              background: '#fff7ed',
+              color: '#c2410c',
+              border: '1px solid #fed7aa',
+              padding: '2px 10px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '800'
+            }}>
+              📦 মোট স্টকের ক্রয়মূল্য: {formatCurrency(totalStockCostValue)}
+            </span>
+            <span style={{
+              background: '#f0fdf4',
+              color: '#15803d',
+              border: '1px solid #bbf7d0',
+              padding: '2px 10px',
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '800'
+            }}>
+              💰 সম্ভাব্য বিক্রয়মূল্য: {formatCurrency(totalStockRetailValue)}
+            </span>
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
