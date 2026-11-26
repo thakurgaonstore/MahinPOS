@@ -6,6 +6,15 @@ import { formatCurrency, formatDate, formatDateTime } from '../utils/formatters'
 import { Link } from 'react-router-dom';
 import InvoiceViewModal from './invoices/InvoiceViewModal';
 import AccountBalancesCardGrid from '../components/accounts/AccountBalancesCardGrid';
+import BusinessCapitalSummaryCard from '../components/accounts/BusinessCapitalSummaryCard';
+import BankAccountManagerModal from '../components/accounts/BankAccountManagerModal';
+import TransferFundModal from '../components/accounts/TransferFundModal';
+import AddMoneyModal from '../components/accounts/AddMoneyModal';
+import {
+  subscribeToAccountBalances,
+  subscribeToBankAccounts,
+  DEFAULT_BALANCES
+} from '../utils/financialAccountsManager';
 
 import {
   MdPointOfSale,
@@ -41,10 +50,18 @@ const DashboardHome = () => {
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [staffList, setStaffList] = useState([]);
   const [viewInvoice, setViewInvoice] = useState(null);
   const [shopConfig, setShopConfig] = useState(null);
+
+  // Financial Balances & Dynamic Bank Accounts State
+  const [financialBalances, setFinancialBalances] = useState(DEFAULT_BALANCES);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [isBankManagerOpen, setIsBankManagerOpen] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
+  const [isAddMoneyOpen, setIsAddMoneyOpen] = useState(false);
 
   useEffect(() => {
     if (!shopId) return;
@@ -69,6 +86,24 @@ const DashboardHome = () => {
       const list = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setCustomers(list);
+    });
+
+    // Realtime Suppliers (for payables & capital audit)
+    const unsubSupp = onSnapshot(collection(db, 'shops', shopId, 'suppliers'), (snap) => {
+      const list = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setSuppliers(list);
+    }, (err) => {
+      console.warn("Suppliers listener warning:", err);
+    });
+
+    // Realtime Account Balances & Dynamic Bank Accounts
+    const unsubBalances = subscribeToAccountBalances(shopId, (b) => {
+      setFinancialBalances(b);
+    });
+
+    const unsubBanks = subscribeToBankAccounts(shopId, (bList) => {
+      setBankAccounts(bList);
     });
 
     // Realtime Staff
@@ -98,6 +133,9 @@ const DashboardHome = () => {
       unsubSales();
       unsubProd();
       unsubCust();
+      unsubSupp();
+      unsubBalances();
+      unsubBanks();
       unsubStaff();
       unsubExp();
     };
@@ -180,6 +218,22 @@ const DashboardHome = () => {
   }, 0);
 
   const totalStockQty = products.reduce((sum, p) => sum + Math.max(0, Number(p.stock) || 0), 0);
+
+  // 1.2 Multi-Account Balances & Business Capital Aggregates
+  const totalBankBalance = bankAccounts.length > 0
+    ? bankAccounts.reduce((sum, b) => sum + (Number(b.currentBalance) || 0), 0)
+    : (Number(financialBalances.bank) || 0);
+
+  const totalLiquidFunds = 
+    (Number(financialBalances.cash) || 0) +
+    totalBankBalance +
+    (Number(financialBalances.bkash) || 0) +
+    (Number(financialBalances.nagad) || 0) +
+    (Number(financialBalances.agent_bank) || 0) +
+    (Number(financialBalances.flexiload) || 0);
+
+  const totalCustomerDues = customers.reduce((sum, c) => sum + (Number(c.dueAmount) || 0), 0);
+  const totalSupplierDues = suppliers.reduce((sum, s) => sum + (Number(s.duePayable || s.dueAmount) || 0), 0);
 
   // 2. Logged-in Staff Member Details & Incentive Calculation
   const loggedInStaff = staffList.find(s => 
@@ -660,6 +714,20 @@ const DashboardHome = () => {
             SECTION 2: OWNER & MANAGER FULL SHOP OVERVIEW
         ========================================================================= */
         <>
+          {/* Business Capital & Net Worth Overview (দোকানের মোট মূলধন ও সম্পদ অডিট) */}
+          <BusinessCapitalSummaryCard
+            totalLiquidFunds={totalLiquidFunds}
+            totalStockCostValue={totalStockCostValue}
+            totalCustomerDues={totalCustomerDues}
+            totalSupplierDues={totalSupplierDues}
+            cashBalance={financialBalances.cash || 0}
+            bankBalance={totalBankBalance}
+            totalStockQty={totalStockQty}
+            onOpenBankManager={() => setIsBankManagerOpen(true)}
+            onOpenTransfer={() => setIsTransferOpen(true)}
+            onOpenAddMoney={() => setIsAddMoneyOpen(true)}
+          />
+
           {/* Multi-Account Balances Grid (Cash, Bank, bKash, Nagad, Agent Bank, Flexiload, Total Balance) */}
           <AccountBalancesCardGrid
             shopId={shopId}
@@ -1035,6 +1103,39 @@ const DashboardHome = () => {
           initialFormat={shopConfig?.defaultInvoiceFormat || 'pos'}
         />
       )}
+
+      {/* Bank Account Manager Modal */}
+      <BankAccountManagerModal
+        isOpen={isBankManagerOpen}
+        onClose={() => setIsBankManagerOpen(false)}
+        shopId={shopId}
+        operatorName={userProfile?.name || 'Admin'}
+        operatorId={userProfile?.staffId || ''}
+        onTransferRequest={() => {
+          setIsBankManagerOpen(false);
+          setIsTransferOpen(true);
+        }}
+      />
+
+      {/* Fund Transfer Modal */}
+      <TransferFundModal
+        isOpen={isTransferOpen}
+        onClose={() => setIsTransferOpen(false)}
+        shopId={shopId}
+        currentBalances={{ ...financialBalances, bank: totalBankBalance }}
+        operatorName={userProfile?.name || 'Admin'}
+        operatorId={userProfile?.staffId || ''}
+      />
+
+      {/* Add Money Modal */}
+      <AddMoneyModal
+        isOpen={isAddMoneyOpen}
+        onClose={() => setIsAddMoneyOpen(false)}
+        shopId={shopId}
+        currentBalances={{ ...financialBalances, bank: totalBankBalance }}
+        operatorName={userProfile?.name || 'Admin'}
+        operatorId={userProfile?.staffId || ''}
+      />
     </div>
   );
 };

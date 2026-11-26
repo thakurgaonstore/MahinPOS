@@ -1,43 +1,99 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
-import { MdClose, MdSwapHoriz, MdPayments, MdAccountBalance, MdPhoneAndroid, MdStoreMallDirectory, MdCellWifi, MdArrowForward } from 'react-icons/md';
-import { ACCOUNT_KEYS, transferAccountFund } from '../../utils/financialAccountsManager';
+import {
+  MdClose,
+  MdSwapHoriz,
+  MdPayments,
+  MdAccountBalance,
+  MdPhoneAndroid,
+  MdStoreMallDirectory,
+  MdCellWifi,
+  MdArrowForward
+} from 'react-icons/md';
+import {
+  ACCOUNT_KEYS,
+  transferAccountFund,
+  transferBetweenAnyAccounts,
+  subscribeToBankAccounts
+} from '../../utils/financialAccountsManager';
 import { formatCurrency } from '../../utils/formatters';
 
-const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorName, operatorId, onSuccess, defaultFrom = 'bank', defaultTo = 'cash' }) => {
+const TransferFundModal = ({
+  isOpen,
+  onClose,
+  shopId,
+  currentBalances,
+  operatorName,
+  operatorId,
+  onSuccess,
+  defaultFrom = 'bank',
+  defaultTo = 'cash',
+  initialFromBankId = null
+}) => {
   if (!isOpen) return null;
 
-  const [fromAccount, setFromAccount] = useState(defaultFrom);
-  const [toAccount, setToAccount] = useState(defaultTo);
+  const [fromType, setFromType] = useState(defaultFrom);
+  const [toType, setToType] = useState(defaultTo);
+  const [fromBankId, setFromBankId] = useState(initialFromBankId || '');
+  const [toBankId, setToBankId] = useState('');
   const [amount, setAmount] = useState('');
+  const [checkNumber, setCheckNumber] = useState('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const [bankAccounts, setBankAccounts] = useState([]);
+
+  useEffect(() => {
+    if (!shopId) return;
+    const unsub = subscribeToBankAccounts(shopId, (list) => {
+      setBankAccounts(list);
+      if (list.length > 0) {
+        if (!fromBankId) setFromBankId(list[0].id);
+        if (list.length > 1 && !toBankId) setToBankId(list[1].id);
+        else if (!toBankId) setToBankId(list[0].id);
+      }
+    });
+    return () => unsub();
+  }, [shopId]);
 
   const quickPresets = [
-    { label: '🏦 ব্যাংক ➔ ক্যাশ', from: 'bank', to: 'cash', note: 'ব্যাংক থেকে নগদ ক্যাশ ড্রয়ারে উত্তোলন' },
-    { label: '💵 ক্যাশ ➔ ব্যাংক', from: 'cash', to: 'bank', note: 'দোকানের ক্যাশ টাকা ব্যাংকে জমা' },
-    { label: '💵 ক্যাশ ➔ ফ্লেক্সিলোড', from: 'cash', to: 'flexiload', note: 'ক্যাশ থেকে ফ্লেক্সিলোড সিম রিচার্জ ক্রয়' },
-    { label: '📱 বিকাশ ➔ ব্যাংক', from: 'bkash', to: 'bank', note: 'বিকাশ মার্চেন্ট থেকে ব্যাংক অ্যাকাউন্টে ট্রান্সফার' },
-    { label: '🟠 নগদ ➔ ব্যাংক', from: 'nagad', to: 'bank', note: 'নগদ ব্যালান্স ব্যাংকে জমা' },
-    { label: '🏛️ এজেন্ট ➔ ক্যাশ', from: 'agent_bank', to: 'cash', note: 'এজেন্ট ব্যাংকিং ব্যালান্স ক্যাশে রূপান্তর' },
+    { label: '🏦 ব্যাংক ➔ ব্যাংক', fromType: 'bank', toType: 'bank', note: 'এক ব্যাংক হিসাব থেকে অন্য ব্যাংক হিসাবে ফান্ড ট্রান্সফার' },
+    { label: '🏦 ব্যাংক ➔ ক্যাশ', fromType: 'bank', toType: 'cash', note: 'ব্যাংক থেকে নগদ ক্যাশ ড্রয়ারে উত্তোলন' },
+    { label: '💵 ক্যাশ ➔ ব্যাংক', fromType: 'cash', toType: 'bank', note: 'দোকানের ক্যাশ টাকা ব্যাংকে জমা' },
+    { label: '💵 ক্যাশ ➔ ফ্লেক্সিলোড', fromType: 'cash', toType: 'flexiload', note: 'ক্যাশ থেকে ফ্লেক্সিলোড সিম রিচার্জ ক্রয়' },
+    { label: '📱 বিকাশ ➔ ব্যাংক', fromType: 'bkash', toType: 'bank', note: 'বিকাশ মার্চেন্ট থেকে ব্যাংক অ্যাকাউন্টে ট্রান্সফার' },
+    { label: '🟠 নগদ ➔ ব্যাংক', fromType: 'nagad', toType: 'bank', note: 'নগদ ব্যালান্স ব্যাংকে জমা' },
   ];
 
   const quickAmounts = [500, 1000, 2000, 5000, 10000, 20000, 50000];
 
   const applyPreset = (preset) => {
-    setFromAccount(preset.from);
-    setToAccount(preset.to);
+    setFromType(preset.fromType);
+    setToType(preset.toType);
     if (!note) setNote(preset.note);
   };
 
   const handleSwap = () => {
-    const temp = fromAccount;
-    setFromAccount(toAccount);
-    setToAccount(temp);
+    const tempType = fromType;
+    setFromType(toType);
+    setToType(tempType);
+
+    const tempBank = fromBankId;
+    setFromBankId(toBankId);
+    setToBankId(tempBank);
   };
 
-  const fromBalance = currentBalances?.[fromAccount] || 0;
-  const toBalance = currentBalances?.[toAccount] || 0;
+  const selectedFromBank = bankAccounts.find(b => b.id === fromBankId);
+  const selectedToBank = bankAccounts.find(b => b.id === toBankId);
+
+  // Compute available balance in source
+  const getSourceBalance = () => {
+    if (fromType === 'bank' && selectedFromBank) {
+      return Number(selectedFromBank.currentBalance) || 0;
+    }
+    return currentBalances?.[fromType] || 0;
+  };
+
+  const fromBalance = getSourceBalance();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -47,8 +103,13 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
       return;
     }
 
-    if (fromAccount === toAccount) {
+    if (fromType === toType && fromType !== 'bank') {
       toast.error('উৎস ও গন্তব্য অ্যাকাউন্ট ভিন্ন হতে হবে');
+      return;
+    }
+
+    if (fromType === 'bank' && toType === 'bank' && fromBankId === toBankId) {
+      toast.error('উৎস ব্যাংক ও গন্তব্য ব্যাংক অ্যাকাউন্ট আলাদা হতে হবে');
       return;
     }
 
@@ -60,16 +121,24 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
 
     setLoading(true);
     try {
-      await transferAccountFund(shopId, {
-        fromAccount,
-        toAccount,
+      await transferBetweenAnyAccounts(shopId, {
+        fromType,
+        fromBankId: fromType === 'bank' ? fromBankId : null,
+        fromBankName: fromType === 'bank' ? (selectedFromBank?.bankName || 'ব্যাংক') : '',
+        toType,
+        toBankId: toType === 'bank' ? toBankId : null,
+        toBankName: toType === 'bank' ? (selectedToBank?.bankName || 'ব্যাংক') : '',
         amount: num,
-        note: note || `${ACCOUNT_KEYS[fromAccount]?.shortName} থেকে ${ACCOUNT_KEYS[toAccount]?.shortName} ফান্ড ট্রান্সফার`,
+        checkNumber,
+        note: note || 'ফান্ড ট্রান্সফার লেনদেন',
         operatorName,
         operatorId
       });
 
-      toast.success(`${ACCOUNT_KEYS[fromAccount]?.shortName} থেকে ${ACCOUNT_KEYS[toAccount]?.shortName}-এ ৳${num.toLocaleString('bn-BD')} সফলভাবে ট্রান্সফার হয়েছে!`);
+      const fromLabel = fromType === 'bank' ? selectedFromBank?.bankName : ACCOUNT_KEYS[fromType]?.shortName;
+      const toLabel = toType === 'bank' ? selectedToBank?.bankName : ACCOUNT_KEYS[toType]?.shortName;
+
+      toast.success(`${fromLabel} থেকে ${toLabel}-এ ৳${num.toLocaleString('bn-BD')} সফলভাবে ট্রান্সফার সম্পন্ন হয়েছে!`);
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
@@ -89,14 +158,14 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 1000,
+      zIndex: 1050,
       padding: '16px'
     }}>
       <div style={{
         background: '#ffffff',
         borderRadius: '16px',
         width: '100%',
-        maxWidth: '540px',
+        maxWidth: '560px',
         maxHeight: '92vh',
         overflowY: 'auto',
         boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2)',
@@ -118,9 +187,9 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
             <MdSwapHoriz size={26} />
             <div>
               <h2 style={{ fontSize: '18px', fontWeight: '800', margin: 0 }}>
-                ফান্ড ট্রান্সফার (Account Fund Transfer)
+                ফান্ড ট্রান্সফার (Fund Transfer)
               </h2>
-              <span style={{ fontSize: '11px', opacity: 0.85 }}>ব্যাংক টু ক্যাশ ও অভ্যন্তরীণ অ্যাকাউন্ট লেনদেন</span>
+              <span style={{ fontSize: '11px', opacity: 0.85 }}>ব্যাংক টু ব্যাংক, ব্যাংক টু ক্যাশ ও অভ্যন্তরীণ অ্যাকাউন্ট লেনদেন</span>
             </div>
           </div>
           <button
@@ -151,7 +220,7 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
             </span>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {quickPresets.map((preset) => {
-                const isActive = fromAccount === preset.from && toAccount === preset.to;
+                const isActive = fromType === preset.fromType && toType === preset.toType;
                 return (
                   <button
                     key={preset.label}
@@ -193,8 +262,8 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
                 যেখান থেকে কাটবে (From)
               </label>
               <select
-                value={fromAccount}
-                onChange={(e) => setFromAccount(e.target.value)}
+                value={fromType}
+                onChange={(e) => setFromType(e.target.value)}
                 style={{
                   width: '100%',
                   padding: '8px 10px',
@@ -203,17 +272,44 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
                   fontSize: '13px',
                   fontWeight: '700',
                   background: '#ffffff',
-                  outline: 'none'
+                  outline: 'none',
+                  marginBottom: fromType === 'bank' ? '6px' : '0'
                 }}
               >
                 {Object.values(ACCOUNT_KEYS).map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.shortName} ({formatCurrency(currentBalances?.[acc.id] || 0)})
+                    {acc.shortName}
                   </option>
                 ))}
               </select>
+
+              {/* If Bank, select which bank */}
+              {fromType === 'bank' && bankAccounts.length > 0 && (
+                <select
+                  value={fromBankId}
+                  onChange={(e) => setFromBankId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #93c5fd',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    background: '#eff6ff',
+                    color: '#1e40af',
+                    outline: 'none'
+                  }}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.bankName} ({formatCurrency(b.currentBalance || 0)})
+                    </option>
+                  ))}
+                </select>
+              )}
+
               <div style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', marginTop: '4px' }}>
-                বর্তমান: <b style={{ color: '#0f172a' }}>{formatCurrency(fromBalance)}</b>
+                ব্যালান্স: <b style={{ color: '#0f172a' }}>{formatCurrency(fromBalance)}</b>
               </div>
             </div>
 
@@ -246,8 +342,8 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
                 যেখানে জমা হবে (To)
               </label>
               <select
-                value={toAccount}
-                onChange={(e) => setToAccount(e.target.value)}
+                value={toType}
+                onChange={(e) => setToType(e.target.value)}
                 style={{
                   width: '100%',
                   padding: '8px 10px',
@@ -256,17 +352,46 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
                   fontSize: '13px',
                   fontWeight: '700',
                   background: '#ffffff',
-                  outline: 'none'
+                  outline: 'none',
+                  marginBottom: toType === 'bank' ? '6px' : '0'
                 }}
               >
                 {Object.values(ACCOUNT_KEYS).map((acc) => (
                   <option key={acc.id} value={acc.id}>
-                    {acc.shortName} ({formatCurrency(currentBalances?.[acc.id] || 0)})
+                    {acc.shortName}
                   </option>
                 ))}
               </select>
+
+              {/* If Bank, select which bank */}
+              {toType === 'bank' && bankAccounts.length > 0 && (
+                <select
+                  value={toBankId}
+                  onChange={(e) => setToBankId(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
+                    border: '1px solid #86efac',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    background: '#f0fdf4',
+                    color: '#15803d',
+                    outline: 'none'
+                  }}
+                >
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.bankName} ({formatCurrency(b.currentBalance || 0)})
+                    </option>
+                  ))}
+                </select>
+              )}
+
               <div style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', marginTop: '4px' }}>
-                বর্তমান: <b style={{ color: '#0f172a' }}>{formatCurrency(toBalance)}</b>
+                ব্যালান্স: <b style={{ color: '#0f172a' }}>
+                  {formatCurrency(toType === 'bank' && selectedToBank ? selectedToBank.currentBalance : (currentBalances?.[toType] || 0))}
+                </b>
               </div>
             </div>
           </div>
@@ -338,7 +463,31 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
             </div>
           </div>
 
-          {/* Note / Remarks */}
+          {/* Check / Ref No (If Bank is involved) */}
+          {(fromType === 'bank' || toType === 'bank') && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>
+                চেক নম্বর / ট্রানজ্যাকশন আইডি (ঐচ্ছিক)
+              </label>
+              <input
+                type="text"
+                value={checkNumber}
+                onChange={(e) => setCheckNumber(e.target.value)}
+                placeholder="যেমন: চেক নং ৪৭৮৯১ বা ফান্ড ট্রান্সফার রেফারেন্স"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  fontSize: '13px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+          )}
+
+          {/* Note / Purpose */}
           <div style={{ marginBottom: '20px' }}>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#334155', marginBottom: '6px' }}>
               মন্তব্য / কারণ (Note / Purpose)
@@ -347,7 +496,7 @@ const TransferFundModal = ({ isOpen, onClose, shopId, currentBalances, operatorN
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="যেমন: ব্যাংক থেকে চেক মারফত ক্যাশ ড্রয়ারে আনয়ন"
+              placeholder="যেমন: ডাচ-বাংলা ব্যাংক থেকে ইসলামী ব্যাংকে স্থানান্তর"
               style={{
                 width: '100%',
                 padding: '10px 12px',

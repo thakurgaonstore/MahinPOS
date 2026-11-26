@@ -3,6 +3,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   increment,
   serverTimestamp,
   collection,
@@ -317,3 +318,278 @@ export const subscribeToAccountTransactions = (shopId, callback, limitCount = 30
     callback([]);
   });
 };
+
+/**
+ * =========================================================================
+ * MULTIPLE DYNAMIC BANK ACCOUNTS SYSTEM
+ * =========================================================================
+ */
+
+/**
+ * Real-time listener for individual bank accounts
+ */
+export const subscribeToBankAccounts = (shopId, callback) => {
+  if (!shopId) return () => {};
+
+  const q = query(
+    collection(db, 'shops', shopId, 'bank_accounts'),
+    orderBy('createdAt', 'asc')
+  );
+
+  return onSnapshot(q, (snap) => {
+    const list = [];
+    snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+    callback(list);
+  }, (err) => {
+    console.warn("Bank accounts listener warning:", err);
+    callback([]);
+  });
+};
+
+/**
+ * Create a new bank account
+ */
+export const createBankAccount = async (shopId, { bankName, accountName, accountNumber, branch, accountType, openingBalance, operatorName, operatorId }) => {
+  if (!shopId || !bankName || !accountNumber) {
+    throw new Error('ব্যাংকের নাম এবং অ্যাকাউন্ট নম্বর আবশ্যক');
+  }
+
+  const numOpening = Number(openingBalance) || 0;
+
+  // 1. Add bank account doc
+  const bankDocRef = await addDoc(collection(db, 'shops', shopId, 'bank_accounts'), {
+    bankName: bankName.trim(),
+    accountName: (accountName || '').trim(),
+    accountNumber: accountNumber.trim(),
+    branch: (branch || '').trim(),
+    accountType: accountType || 'চলতি (Current)',
+    currentBalance: numOpening,
+    openingBalance: numOpening,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  // 2. Sync with aggregate bank balance
+  if (numOpening > 0) {
+    const balancesDocRef = doc(db, 'shops', shopId, 'financial_accounts', 'balances');
+    await setDoc(balancesDocRef, {
+      bank: increment(numOpening),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+
+    // 3. Log initial capital / opening balance
+    const txRef = collection(db, 'shops', shopId, 'account_transactions');
+    await addDoc(txRef, {
+      type: 'add_money',
+      account: 'bank',
+      bankId: bankDocRef.id,
+      bankName: bankName.trim(),
+      amount: numOpening,
+      source: 'ব্যাংক হিসাব খোলার প্রারম্ভিক মূলধন',
+      note: `${bankName} (${accountNumber}) নতুন অ্যাকাউন্ট সৃষ্টি`,
+      operatorName: operatorName || 'Admin',
+      operatorId: operatorId || '',
+      createdAt: serverTimestamp(),
+      timestamp: Date.now()
+    });
+  }
+
+  return bankDocRef.id;
+};
+
+/**
+ * Update bank account details
+ */
+export const updateBankAccount = async (shopId, bankId, updateData) => {
+  if (!shopId || !bankId) throw new Error('অবৈধ ব্যাংক অ্যাকাউন্ট আইডি');
+
+  const ref = doc(db, 'shops', shopId, 'bank_accounts', bankId);
+  await updateDoc(ref, {
+    ...updateData,
+    updatedAt: serverTimestamp()
+  });
+  return true;
+};
+
+/**
+ * Delete a bank account
+ */
+export const deleteBankAccount = async (shopId, bankId, currentBalance = 0) => {
+  if (!shopId || !bankId) throw new Error('অবৈধ ব্যাংক অ্যাকাউন্ট আইডি');
+
+  const numBal = Number(currentBalance) || 0;
+
+  // Delete bank doc
+  await deleteDoc(doc(db, 'shops', shopId, 'bank_accounts', bankId));
+
+  // If had balance, adjust total bank balance
+  if (numBal !== 0) {
+    const balancesDocRef = doc(db, 'shops', shopId, 'financial_accounts', 'balances');
+    await setDoc(balancesDocRef, {
+      bank: increment(-numBal),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+
+  return true;
+};
+
+/**
+ * Bank-to-Bank Fund Transfer
+ */
+export const transferBankToBank = async (shopId, { fromBankId, fromBankName, toBankId, toBankName, amount, checkNumber, note, operatorName, operatorId }) => {
+  const numAmount = Number(amount);
+  if (!shopId || !fromBankId || !toBankId || isNaN(numAmount) || numAmount <= 0) {
+    throw new Error('অবৈধ ট্রান্সফার তথ্য বা টাকার পরিমাণ');
+  }
+
+  if (fromBankId === toBankId) {
+    throw new Error('উৎস ও গন্তব্য ব্যাংক অ্যাকাউন্ট একই হতে পারবে না');
+  }
+
+  // 1. Decrement from source bank
+  const fromRef = doc(db, 'shops', shopId, 'bank_accounts', fromBankId);
+  await updateDoc(fromRef, {
+    currentBalance: increment(-numAmount),
+    updatedAt: serverTimestamp()
+  });
+
+  // 2. Increment target bank
+  const toRef = doc(db, 'shops', shopId, 'bank_accounts', toBankId);
+  await updateDoc(toRef, {
+    currentBalance: increment(numAmount),
+    updatedAt: serverTimestamp()
+  });
+
+  // 3. Log transaction
+  const txRef = collection(db, 'shops', shopId, 'account_transactions');
+  await addDoc(txRef, {
+    type: 'transfer',
+    subType: 'bank_to_bank',
+    fromAccount: 'bank',
+    fromBankId,
+    fromBankName: fromBankName || 'ব্যাংক ১',
+    toAccount: 'bank',
+    toBankId,
+    toBankName: toBankName || 'ব্যাংক ২',
+    amount: numAmount,
+    checkNumber: checkNumber || '',
+    note: note || `${fromBankName} থেকে ${toBankName}-এ ব্যাংক ট্রান্সফার`,
+    operatorName: operatorName || 'Admin',
+    operatorId: operatorId || '',
+    createdAt: serverTimestamp(),
+    timestamp: Date.now()
+  });
+
+  return true;
+};
+
+/**
+ * Transfer funds between Any Account (Cash, Specific Bank, bKash, Nagad, etc.)
+ */
+export const transferBetweenAnyAccounts = async (shopId, {
+  fromType, // 'cash' | 'bank' | 'bkash' | 'nagad' | 'agent_bank' | 'flexiload'
+  fromBankId = null,
+  fromBankName = '',
+  toType,
+  toBankId = null,
+  toBankName = '',
+  amount,
+  checkNumber = '',
+  note = '',
+  operatorName = 'Admin',
+  operatorId = ''
+}) => {
+  const numAmount = Number(amount);
+  if (!shopId || !fromType || !toType || isNaN(numAmount) || numAmount <= 0) {
+    throw new Error('অবৈধ ট্রান্সফার রিকোয়েস্ট');
+  }
+
+  if (fromType === toType && fromType === 'bank' && fromBankId === toBankId) {
+    throw new Error('একই ব্যাংক অ্যাকাউন্টে ট্রান্সফার সম্ভব নয়');
+  }
+
+  if (fromType === toType && fromType !== 'bank') {
+    throw new Error('একই অ্যাকাউন্টে ট্রান্সফার সম্ভব নয়');
+  }
+
+  const balancesDocRef = doc(db, 'shops', shopId, 'financial_accounts', 'balances');
+
+  // Case 1: Bank to Bank
+  if (fromType === 'bank' && toType === 'bank') {
+    return transferBankToBank(shopId, {
+      fromBankId,
+      fromBankName,
+      toBankId,
+      toBankName,
+      amount: numAmount,
+      checkNumber,
+      note,
+      operatorName,
+      operatorId
+    });
+  }
+
+  // Case 2: Specific Bank to another non-bank account (e.g. Bank to Cash, Bank to Flexiload)
+  if (fromType === 'bank' && toType !== 'bank') {
+    if (fromBankId) {
+      const fromRef = doc(db, 'shops', shopId, 'bank_accounts', fromBankId);
+      await updateDoc(fromRef, {
+        currentBalance: increment(-numAmount),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    await setDoc(balancesDocRef, {
+      bank: increment(-numAmount),
+      [toType]: increment(numAmount),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+  // Case 3: Non-bank to Specific Bank (e.g. Cash to Bank, bKash to Bank)
+  else if (fromType !== 'bank' && toType === 'bank') {
+    if (toBankId) {
+      const toRef = doc(db, 'shops', shopId, 'bank_accounts', toBankId);
+      await updateDoc(toRef, {
+        currentBalance: increment(numAmount),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    await setDoc(balancesDocRef, {
+      [fromType]: increment(-numAmount),
+      bank: increment(numAmount),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+  // Case 4: Non-bank to Non-bank (e.g. Cash to Flexiload, bKash to Cash)
+  else {
+    await setDoc(balancesDocRef, {
+      [fromType]: increment(-numAmount),
+      [toType]: increment(numAmount),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+
+  // Log transaction
+  const txRef = collection(db, 'shops', shopId, 'account_transactions');
+  await addDoc(txRef, {
+    type: 'transfer',
+    fromAccount: fromType,
+    fromBankId: fromBankId || null,
+    fromAccountName: fromType === 'bank' && fromBankName ? fromBankName : (ACCOUNT_KEYS[fromType]?.nameBn || fromType),
+    toAccount: toType,
+    toBankId: toBankId || null,
+    toAccountName: toType === 'bank' && toBankName ? toBankName : (ACCOUNT_KEYS[toType]?.nameBn || toType),
+    amount: numAmount,
+    checkNumber: checkNumber || '',
+    note: note || '',
+    operatorName: operatorName || 'Admin',
+    operatorId: operatorId || '',
+    createdAt: serverTimestamp(),
+    timestamp: Date.now()
+  });
+
+  return true;
+};
+

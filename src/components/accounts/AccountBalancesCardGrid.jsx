@@ -10,52 +10,79 @@ import {
   MdSettings,
   MdAccountBalanceWallet,
   MdArrowForward,
-  MdFlashOn
+  MdFlashOn,
+  MdAccountTree
 } from 'react-icons/md';
-import { ACCOUNT_KEYS, DEFAULT_BALANCES, subscribeToAccountBalances } from '../../utils/financialAccountsManager';
+import {
+  ACCOUNT_KEYS,
+  DEFAULT_BALANCES,
+  subscribeToAccountBalances,
+  subscribeToBankAccounts
+} from '../../utils/financialAccountsManager';
 import { formatCurrency } from '../../utils/formatters';
 import AddMoneyModal from './AddMoneyModal';
 import TransferFundModal from './TransferFundModal';
 import AdjustBalanceModal from './AdjustBalanceModal';
+import BankAccountManagerModal from './BankAccountManagerModal';
 
 const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActions = true }) => {
   const [balances, setBalances] = useState(DEFAULT_BALANCES);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [isAddMoneyOpen, setIsAddMoneyOpen] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
-  const [transferDefaults, setTransferDefaults] = useState({ from: 'bank', to: 'cash' });
+  const [isBankManagerOpen, setIsBankManagerOpen] = useState(false);
+  const [transferDefaults, setTransferDefaults] = useState({ from: 'bank', to: 'cash', initialFromBankId: null });
 
   const operatorName = userProfile?.name || userProfile?.email || 'Admin';
   const operatorId = userProfile?.staffId || '';
 
   useEffect(() => {
     if (!shopId) return;
-    const unsub = subscribeToAccountBalances(shopId, (newBalances) => {
+    const unsubBalances = subscribeToAccountBalances(shopId, (newBalances) => {
       setBalances(newBalances);
     });
-    return () => unsub();
+
+    const unsubBanks = subscribeToBankAccounts(shopId, (list) => {
+      setBankAccounts(list);
+    });
+
+    return () => {
+      unsubBalances();
+      unsubBanks();
+    };
   }, [shopId]);
+
+  // If dynamic bank accounts exist, aggregate bank balance reflects the sum of all banks
+  const totalBankBalance = bankAccounts.length > 0
+    ? bankAccounts.reduce((sum, b) => sum + (Number(b.currentBalance) || 0), 0)
+    : (Number(balances.bank) || 0);
 
   const totalLiquidBalance = 
     (Number(balances.cash) || 0) +
-    (Number(balances.bank) || 0) +
+    totalBankBalance +
     (Number(balances.bkash) || 0) +
     (Number(balances.nagad) || 0) +
     (Number(balances.agent_bank) || 0) +
     (Number(balances.flexiload) || 0);
 
-  const openBankToCashTransfer = () => {
-    setTransferDefaults({ from: 'bank', to: 'cash' });
+  const openBankToCashTransfer = (bankId = null) => {
+    setTransferDefaults({ from: 'bank', to: 'cash', initialFromBankId: bankId });
+    setIsTransferOpen(true);
+  };
+
+  const openBankToBankTransfer = () => {
+    setTransferDefaults({ from: 'bank', to: 'bank', initialFromBankId: bankAccounts[0]?.id || null });
     setIsTransferOpen(true);
   };
 
   const openCashToFlexiloadTransfer = () => {
-    setTransferDefaults({ from: 'cash', to: 'flexiload' });
+    setTransferDefaults({ from: 'cash', to: 'flexiload', initialFromBankId: null });
     setIsTransferOpen(true);
   };
 
   const openCashToBankTransfer = () => {
-    setTransferDefaults({ from: 'cash', to: 'bank' });
+    setTransferDefaults({ from: 'cash', to: 'bank', initialFromBankId: null });
     setIsTransferOpen(true);
   };
 
@@ -95,10 +122,10 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
           </div>
           <div>
             <h2 style={{ fontSize: '18px', fontWeight: '800', color: '#0f172a', margin: 0 }}>
-              সকল অ্যাকাউন্ট ব্যালান্স ও ক্যাশ খাতা (Account Balances)
+              সকল অ্যাকাউন্ট ব্যালান্স ও আর্থিক তহবিল (Account Balances)
             </h2>
             <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0' }}>
-              ক্যাশ ড্রয়ার, ব্যাংক, বিকাশ, নগদ, এজেন্ট ব্যাংক ও ফ্লেক্সিলোড লিকুইড ব্যালান্স ট্র্যাকার
+              ক্যাশ ড্রয়ার, ব্যাংকসমূহ, বিকাশ, নগদ, এজেন্ট ব্যাংক ও ফ্লেক্সিলোড লিকুইড ব্যালান্স ট্র্যাকার
             </p>
           </div>
         </div>
@@ -106,6 +133,28 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
         {/* Action Buttons */}
         {showActions && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {/* Manage Bank Accounts Button */}
+            <button
+              onClick={() => setIsBankManagerOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                border: '1px solid #bfdbfe',
+                background: '#eff6ff',
+                color: '#1d4ed8',
+                fontSize: '13px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                transition: 'all 0.15s'
+              }}
+            >
+              <MdAccountBalance size={17} />
+              ব্যাংক অ্যাকাউন্টসমূহ {bankAccounts.length > 0 && `(${bankAccounts.length})`}
+            </button>
+
             <button
               onClick={() => setIsAddMoneyOpen(true)}
               style={{
@@ -129,7 +178,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
             </button>
 
             <button
-              onClick={openBankToCashTransfer}
+              onClick={() => openBankToCashTransfer()}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -147,7 +196,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
               }}
             >
               <MdSwapHoriz size={18} />
-              ব্যাংক টু ক্যাশ ট্রান্সফার
+              ফান্ড ট্রান্সফার
             </button>
 
             {isOwner && (
@@ -210,7 +259,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
           {showActions && (
             <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
               <button
-                onClick={openBankToCashTransfer}
+                onClick={() => openBankToCashTransfer()}
                 style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
               >
                 + ব্যাংক থেকে আনুন
@@ -225,7 +274,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
           )}
         </div>
 
-        {/* 2. Bank Account */}
+        {/* 2. Bank Accounts (Aggregate of all individual banks) */}
         <div style={{
           background: '#ffffff',
           borderRadius: '14px',
@@ -238,26 +287,49 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
         }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-              <span style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>
-                ব্যাংক ব্যালান্স
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: '#1e40af' }}>
+                  ব্যাংক ব্যালান্স
+                </span>
+                {bankAccounts.length > 0 && (
+                  <span style={{
+                    background: '#eff6ff',
+                    color: '#2563eb',
+                    border: '1px solid #bfdbfe',
+                    borderRadius: '10px',
+                    padding: '1px 6px',
+                    fontSize: '10px',
+                    fontWeight: '800'
+                  }}>
+                    {bankAccounts.length}টি ব্যাংক
+                  </span>
+                )}
+              </div>
               <div style={{ background: '#eff6ff', padding: '6px', borderRadius: '8px', color: '#2563eb' }}>
                 {getAccountIcon('bank')}
               </div>
             </div>
             <div style={{ fontSize: '22px', fontWeight: '900', color: '#0f172a' }}>
-              {formatCurrency(balances.bank)}
+              {formatCurrency(totalBankBalance)}
             </div>
-            <span style={{ fontSize: '11px', color: '#64748b' }}>ব্যাংক একাউন্ট ফান্ড</span>
+            <span style={{ fontSize: '11px', color: '#64748b' }}>সকল ব্যাংক অ্যাকাউন্টের মোট জমা</span>
           </div>
           {showActions && (
-            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0' }}>
+            <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
               <button
-                onClick={openBankToCashTransfer}
+                onClick={() => setIsBankManagerOpen(true)}
                 style={{ background: 'none', border: 'none', color: '#2563eb', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
               >
-                ক্যাশ ড্রয়ারে ট্রান্সফার ➔
+                🏦 ব্যাংক খাতা দেখুন
               </button>
+              {bankAccounts.length > 1 && (
+                <button
+                  onClick={openBankToBankTransfer}
+                  style={{ background: 'none', border: 'none', color: '#7c3aed', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
+                >
+                  ব্যাংক ➔ ব্যাংক ➔
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -291,7 +363,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
             <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0' }}>
               <button
                 onClick={() => {
-                  setTransferDefaults({ from: 'bkash', to: 'bank' });
+                  setTransferDefaults({ from: 'bkash', to: 'bank', initialFromBankId: null });
                   setIsTransferOpen(true);
                 }}
                 style={{ background: 'none', border: 'none', color: '#e11d48', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
@@ -331,7 +403,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
             <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0' }}>
               <button
                 onClick={() => {
-                  setTransferDefaults({ from: 'nagad', to: 'bank' });
+                  setTransferDefaults({ from: 'nagad', to: 'bank', initialFromBankId: null });
                   setIsTransferOpen(true);
                 }}
                 style={{ background: 'none', border: 'none', color: '#ea580c', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
@@ -371,7 +443,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
             <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px dashed #e2e8f0' }}>
               <button
                 onClick={() => {
-                  setTransferDefaults({ from: 'agent_bank', to: 'cash' });
+                  setTransferDefaults({ from: 'agent_bank', to: 'cash', initialFromBankId: null });
                   setIsTransferOpen(true);
                 }}
                 style={{ background: 'none', border: 'none', color: '#0891b2', fontSize: '11px', fontWeight: '700', cursor: 'pointer', padding: 0 }}
@@ -434,7 +506,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
               <span style={{ fontSize: '13px', fontWeight: '800', color: '#38bdf8' }}>
-                সর্বমোট ব্যালান্স (Total Liquid)
+                সর্বমোট তরল ব্যালান্স
               </span>
               <div style={{ background: 'rgba(56, 189, 248, 0.2)', padding: '6px', borderRadius: '8px', color: '#38bdf8' }}>
                 <MdAccountBalanceWallet size={22} />
@@ -443,10 +515,12 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
             <div style={{ fontSize: '24px', fontWeight: '900', color: '#10b981' }}>
               {formatCurrency(totalLiquidBalance)}
             </div>
-            <span style={{ fontSize: '11px', color: '#94a3b8' }}>সকল অ্যাকাউন্টের মোট জমা টাকা</span>
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>সকল একাউন্টের মোট নগদ ও ব্যাংক টাকা</span>
           </div>
           <div style={{ marginTop: '10px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.15)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: '#cbd5e1' }}>৬টি সক্রিয় অ্যাকাউন্ট</span>
+            <span style={{ fontSize: '11px', color: '#cbd5e1' }}>
+              {bankAccounts.length > 0 ? `${bankAccounts.length}টি ব্যাংক + ৫টি ওয়ালেট` : '৬টি সক্রিয় অ্যাকাউন্ট'}
+            </span>
             <button
               onClick={() => setIsAddMoneyOpen(true)}
               style={{ background: '#10b981', border: 'none', borderRadius: '4px', color: '#ffffff', fontSize: '11px', fontWeight: '800', cursor: 'pointer', padding: '2px 8px' }}
@@ -462,7 +536,7 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
         isOpen={isAddMoneyOpen}
         onClose={() => setIsAddMoneyOpen(false)}
         shopId={shopId}
-        currentBalances={balances}
+        currentBalances={{ ...balances, bank: totalBankBalance }}
         operatorName={operatorName}
         operatorId={operatorId}
       />
@@ -471,20 +545,33 @@ const AccountBalancesCardGrid = ({ shopId, userProfile, isOwner = true, showActi
         isOpen={isTransferOpen}
         onClose={() => setIsTransferOpen(false)}
         shopId={shopId}
-        currentBalances={balances}
+        currentBalances={{ ...balances, bank: totalBankBalance }}
         operatorName={operatorName}
         operatorId={operatorId}
         defaultFrom={transferDefaults.from}
         defaultTo={transferDefaults.to}
+        initialFromBankId={transferDefaults.initialFromBankId}
       />
 
       <AdjustBalanceModal
         isOpen={isAdjustOpen}
         onClose={() => setIsAdjustOpen(false)}
         shopId={shopId}
-        currentBalances={balances}
+        currentBalances={{ ...balances, bank: totalBankBalance }}
         operatorName={operatorName}
         operatorId={operatorId}
+      />
+
+      <BankAccountManagerModal
+        isOpen={isBankManagerOpen}
+        onClose={() => setIsBankManagerOpen(false)}
+        shopId={shopId}
+        operatorName={operatorName}
+        operatorId={operatorId}
+        onTransferRequest={(bankId, bankName) => {
+          setIsBankManagerOpen(false);
+          openBankToCashTransfer(bankId);
+        }}
       />
     </div>
   );
