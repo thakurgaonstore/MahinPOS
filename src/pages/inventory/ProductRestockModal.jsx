@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { doc, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { doc, updateDoc, addDoc, collection, serverTimestamp, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
@@ -11,13 +11,15 @@ import {
   MdInventory,
   MdLayers,
   MdInfo,
-  MdOutlineHistoryEdu
+  MdOutlineHistoryEdu,
+  MdLocalShipping
 } from 'react-icons/md';
 import {
   ensureProductBatches,
   addBatchToProduct,
   calculateProductValuation
 } from '../../utils/fifoInventoryManager';
+import { recordSupplierTransaction } from '../../utils/ledgerManager';
 
 const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
   const valuation = calculateProductValuation(product);
@@ -40,9 +42,24 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
   );
 
   const [supplierName, setSupplierName] = useState('');
+  const [selectedSupplierId, setSelectedSupplierId] = useState('');
+  const [suppliersList, setSuppliersList] = useState([]);
+  const [paymentStatus, setPaymentStatus] = useState('full_paid'); // 'full_paid' | 'partial_paid' | 'full_due'
+  const [paidAmountOnRestock, setPaidAmountOnRestock] = useState('');
   const [voucherNo, setVoucherNo] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!shopId) return;
+    getDocs(collection(db, 'shops', shopId, 'suppliers'))
+      .then((snap) => {
+        const list = [];
+        snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+        setSuppliersList(list);
+      })
+      .catch((err) => console.warn("Could not load suppliers for restock:", err));
+  }, [shopId]);
 
   // Parse numeric values
   const addQty = parseFloat(newQuantity) || 0;
@@ -77,12 +94,32 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
     try {
       const finalStock = currentStock + addQty;
 
+      // Calculate paid vs due on this restock batch
+      let actualPaid = newBatchTotalCost;
+      let actualDue = 0;
+      if (paymentStatus === 'full_due') {
+        actualPaid = 0;
+        actualDue = newBatchTotalCost;
+      } else if (paymentStatus === 'partial_paid') {
+        actualPaid = Math.min(newBatchTotalCost, Math.max(0, Number(paidAmountOnRestock) || 0));
+        actualDue = Math.max(0, newBatchTotalCost - actualPaid);
+      }
+
+      // Determine supplier name and supplierId
+      let finalSupplierName = supplierName.trim();
+      let resolvedSupplierId = selectedSupplierId;
+
+      if (selectedSupplierId) {
+        const found = suppliersList.find((s) => s.id === selectedSupplierId);
+        if (found) finalSupplierName = found.name;
+      }
+
       // 1. Prepare FIFO Batches: Existing batches remain intact with their separate costs; append new batch
       const existingBatches = ensureProductBatches(product);
       const updatedBatches = addBatchToProduct(existingBatches, {
         quantity: addQty,
         costPrice: unitCost,
-        supplierName: supplierName.trim(),
+        supplierName: finalSupplierName,
         voucherNo: voucherNo.trim(),
         notes: notes.trim(),
         createdAt: new Date().toISOString()
@@ -119,14 +156,56 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
         retailPrice: rPrice,
         wholesalePrice: wPrice,
         dealerPrice: dPrice,
-        supplierName: supplierName.trim(),
+        supplierName: finalSupplierName,
         voucherNo: voucherNo.trim(),
+        paymentStatus,
+        paidAmount: actualPaid,
+        dueAmount: actualDue,
         notes: notes.trim(),
         isFifoBatch: true,
         createdAt: serverTimestamp()
       });
 
-      toast.success(`"${product.name}" এর নতুন ব্যাচ (৳${unitCost} দরে ${addQty} ${product.unit || 'টি'}) সফলভাবে যুক্ত হয়েছে! (FIFO সক্রিয়)`);
+      // 4. Link to Supplier Ledger if a supplier is linked or if there is due
+      if (finalSupplierName || resolvedSupplierId) {
+        try {
+          if (!resolvedSupplierId) {
+            // Find existing supplier by name or create new supplier doc
+            const match = suppliersList.find((s) => s.name.toLowerCase() === finalSupplierName.toLowerCase());
+            if (match) {
+              resolvedSupplierId = match.id;
+            } else {
+              const newSuppRef = await addDoc(collection(db, 'shops', shopId, 'suppliers'), {
+                name: finalSupplierName,
+                company: '',
+                phone: '',
+                totalPurchased: 0,
+                duePayable: 0,
+                createdAt: serverTimestamp()
+              });
+              resolvedSupplierId = newSuppRef.id;
+            }
+          }
+
+          if (resolvedSupplierId) {
+            await recordSupplierTransaction(shopId, {
+              supplierId: resolvedSupplierId,
+              supplierName: finalSupplierName,
+              type: 'purchase_due',
+              billAmount: newBatchTotalCost,
+              paidAmount: actualPaid,
+              dueAmount: actualDue,
+              paymentMethod: actualPaid > 0 ? 'Cash' : 'Due',
+              voucherNo: voucherNo.trim() || `RESTOCK-${Date.now().toString().slice(-6)}`,
+              note: `"${product.name}" রিস্টক ব্যাচ (${addQty} ${product.unit || 'টি'})` + (notes ? ` - ${notes}` : '')
+            });
+          }
+        } catch (suppErr) {
+          console.warn("Could not log supplier due transaction on restock:", suppErr);
+        }
+      }
+
+      toast.success(`"${product.name}" এর নতুন ব্যাচ (৳${unitCost} দরে ${addQty} ${product.unit || 'টি'}) সফলভাবে যুক্ত হয়েছে!`);
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {
@@ -341,27 +420,72 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '12px' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                  মহাজন / সাপ্লায়ার নাম (ঐচ্ছিক)
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '4px' }}>
+                  মহাজন / সাপ্লায়ার নির্বাচন করুন (ঐচ্ছিক)
                 </label>
-                <input
-                  type="text"
-                  placeholder="যেমন: এসিআই লজিস্টিকস"
-                  value={supplierName}
-                  onChange={(e) => setSupplierName(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '13px'
-                  }}
-                />
+                {suppliersList.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <select
+                      value={selectedSupplierId}
+                      onChange={(e) => {
+                        setSelectedSupplierId(e.target.value);
+                        if (e.target.value) {
+                          const s = suppliersList.find(sup => sup.id === e.target.value);
+                          if (s) setSupplierName(s.name);
+                        }
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        fontSize: '13px'
+                      }}
+                    >
+                      <option value="">-- তালিকা হতে মহাজন নির্বাচন করুন --</option>
+                      {suppliersList.map((sup) => (
+                        <option key={sup.id} value={sup.id}>
+                          {sup.name} {sup.company ? `(${sup.company})` : ''} - দেনা: ৳{sup.duePayable || 0}
+                        </option>
+                      ))}
+                    </select>
+                    {!selectedSupplierId && (
+                      <input
+                        type="text"
+                        placeholder="অথবা নতুন মহাজনের নাম লিখুন..."
+                        value={supplierName}
+                        onChange={(e) => setSupplierName(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '6px',
+                          border: '1px dashed #cbd5e1',
+                          fontSize: '12px'
+                        }}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    placeholder="যেমন: এসিআই লজিস্টিকস"
+                    value={supplierName}
+                    onChange={(e) => setSupplierName(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '13px'
+                    }}
+                  />
+                )}
               </div>
+
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '4px' }}>
                   চালান / ভাউচার নং (ঐচ্ছিক)
                 </label>
                 <input
@@ -380,7 +504,120 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
               </div>
             </div>
 
-            <div style={{ marginTop: '10px' }}>
+            {/* Payment & Credit / Due Option */}
+            <div style={{
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px',
+              padding: '12px',
+              marginBottom: '12px'
+            }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#1e293b', marginBottom: '6px' }}>
+                💳 মহাজন পেমেন্ট শর্ত (Payment & Due Status):
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: paymentStatus === 'partial_paid' ? '10px' : '0' }}>
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: paymentStatus === 'full_paid' ? '#ecfdf5' : '#ffffff',
+                  border: `1.5px solid ${paymentStatus === 'full_paid' ? '#10b981' : '#cbd5e1'}`,
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  color: paymentStatus === 'full_paid' ? '#047857' : '#475569'
+                }}>
+                  <input
+                    type="radio"
+                    name="paymentStatus"
+                    value="full_paid"
+                    checked={paymentStatus === 'full_paid'}
+                    onChange={() => setPaymentStatus('full_paid')}
+                  />
+                  সম্পূর্ণ নগদ পরিশোধ
+                </label>
+
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: paymentStatus === 'partial_paid' ? '#eff6ff' : '#ffffff',
+                  border: `1.5px solid ${paymentStatus === 'partial_paid' ? '#2563eb' : '#cbd5e1'}`,
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  color: paymentStatus === 'partial_paid' ? '#1d4ed8' : '#475569'
+                }}>
+                  <input
+                    type="radio"
+                    name="paymentStatus"
+                    value="partial_paid"
+                    checked={paymentStatus === 'partial_paid'}
+                    onChange={() => setPaymentStatus('partial_paid')}
+                  />
+                  আংশিক পে ও বাকি
+                </label>
+
+                <label style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: paymentStatus === 'full_due' ? '#fef2f2' : '#ffffff',
+                  border: `1.5px solid ${paymentStatus === 'full_due' ? '#dc2626' : '#cbd5e1'}`,
+                  padding: '7px 10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  color: paymentStatus === 'full_due' ? '#b91c1c' : '#475569'
+                }}>
+                  <input
+                    type="radio"
+                    name="paymentStatus"
+                    value="full_due"
+                    checked={paymentStatus === 'full_due'}
+                    onChange={() => setPaymentStatus('full_due')}
+                  />
+                  সম্পূর্ণ বাকিতে ক্রয়
+                </label>
+              </div>
+
+              {paymentStatus === 'partial_paid' && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '8px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#475569', fontWeight: '700', display: 'block', marginBottom: '3px' }}>নগদ পরিশোধের টাকা (৳):</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      max={newBatchTotalCost}
+                      placeholder="যেমন: 5000"
+                      value={paidAmountOnRestock}
+                      onChange={(e) => setPaidAmountOnRestock(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #2563eb', fontSize: '13px', fontWeight: '700', color: '#1d4ed8' }}
+                    />
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#991b1b', fontWeight: '700', display: 'block', marginBottom: '3px' }}>মহাজনের নতুন বাকি পাওনা হবে:</span>
+                    <div style={{ padding: '7px 10px', borderRadius: '6px', background: '#fee2e2', border: '1px solid #fecaca', fontSize: '13px', fontWeight: '800', color: '#dc2626' }}>
+                      {formatCurrency(Math.max(0, newBatchTotalCost - (Number(paidAmountOnRestock) || 0)))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {paymentStatus === 'full_due' && (
+                <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c', fontWeight: '700' }}>
+                  ⚠️ চালানের সম্পূর্ণ মূল্য <strong>{formatCurrency(newBatchTotalCost)}</strong> মহাজনের বকেয়া খাতায় যুক্ত হবে।
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: '6px' }}>
               <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
                 অতিরিক্ত মন্তব্য / নোট (ঐচ্ছিক)
               </label>

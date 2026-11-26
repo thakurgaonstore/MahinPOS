@@ -20,6 +20,7 @@ import QuickAddCustomerModal from '../../components/QuickAddCustomerModal';
 import InvoiceViewModal from '../invoices/InvoiceViewModal';
 import { creditAccountFromSale } from '../../utils/financialAccountsManager';
 import { ensureProductBatches, depleteBatchesFIFO } from '../../utils/fifoInventoryManager';
+import { recordCustomerTransaction } from '../../utils/ledgerManager';
 
 // Icons
 import {
@@ -562,6 +563,25 @@ const POSTerminal = () => {
             updateFields.rewardPoints = increment(pointsDiff);
           }
           await updateDoc(cDoc, updateFields);
+
+          // 3.1 Record customer due transaction in ledger if there is due
+          if (actualDue > 0) {
+            recordCustomerTransaction(shopId, {
+              customerId: selectedCustomer.id,
+              customerName: selectedCustomer.name || 'সাধারণ ক্রেতা',
+              customerPhone: selectedCustomer.phone || '',
+              type: 'sale_due',
+              invoiceNo: invoiceNo,
+              billAmount: grandTotal,
+              paidAmount: actualPaid,
+              dueAmount: actualDue,
+              paymentMethod: paymentMethod,
+              note: (pricingTier === 'wholesale' ? 'পাইকারি বিক্রয় বাকি' : pricingTier === 'dealer' ? 'ডিলার বিক্রয় বাকি' : 'খুচরা বিক্রয় বাকি') + (paymentNote ? ` (${paymentNote})` : ''),
+              recordedBy: userProfile?.name || userProfile?.email || 'Admin'
+            }).catch((err) => {
+              console.warn("Could not log customer due transaction:", err);
+            });
+          }
         } catch (e) {
           console.warn("Customer update error:", e);
         }

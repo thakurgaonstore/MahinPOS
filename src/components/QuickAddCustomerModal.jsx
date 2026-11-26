@@ -3,12 +3,14 @@ import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { toast } from 'react-hot-toast';
 import { MdClose, MdPersonAdd } from 'react-icons/md';
+import { recordCustomerTransaction } from '../utils/ledgerManager';
 
 const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone = '' }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState(initialPhone || '');
   const [address, setAddress] = useState('');
   const [customerType, setCustomerType] = useState('retail'); // 'retail' | 'wholesale' | 'dealer'
+  const [initialDue, setInitialDue] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -20,6 +22,8 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
 
     setLoading(true);
     try {
+      const initDueNum = Math.max(0, Number(initialDue) || 0);
+
       const custData = {
         name: name.trim(),
         phone: phone.trim(),
@@ -27,13 +31,30 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
         customerType: customerType || 'retail',
         rewardPoints: 0,
         totalPurchases: 0,
-        dueAmount: 0,
+        dueAmount: initDueNum,
         createdAt: serverTimestamp()
       };
 
       const docRef = await addDoc(collection(db, 'shops', shopId, 'customers'), custData);
+
+      // Record opening balance transaction if there was prior due
+      if (initDueNum > 0) {
+        await recordCustomerTransaction(shopId, {
+          customerId: docRef.id,
+          customerName: name.trim(),
+          customerPhone: phone.trim(),
+          type: 'opening_balance',
+          invoiceNo: 'INIT-DUE',
+          billAmount: 0,
+          paidAmount: 0,
+          dueAmount: initDueNum,
+          note: 'কাস্টমার প্রোফাইল তৈরির সময় পূর্বের বকেয়া জের',
+          recordedBy: 'Admin'
+        });
+      }
+
       toast.success('নতুন কাস্টমার যুক্ত হয়েছে!');
-      onCustomerAdded({ id: docRef.id, ...custData });
+      if (onCustomerAdded) onCustomerAdded({ id: docRef.id, ...custData });
       onClose();
     } catch (err) {
       console.error("Error adding customer:", err);
@@ -148,6 +169,21 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               placeholder="গ্রাম/রোড, এলাকা, থানা"
+              style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none' }}
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', color: '#334155', marginBottom: '4px' }}>
+              পূর্বে কোনো বাকি পাওনা আছে কি? (ঐচ্ছিক প্রারম্ভিক জের ৳)
+            </label>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={initialDue}
+              onChange={(e) => setInitialDue(e.target.value)}
+              placeholder="যেমন: 3500"
               style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', outline: 'none' }}
             />
           </div>

@@ -5,7 +5,9 @@ import { useAuth } from '../../context/AuthContext';
 import { formatCurrency } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
 import QuickAddCustomerModal from '../../components/QuickAddCustomerModal';
-import { MdPersonAdd, MdSearch, MdCardGiftcard, MdAttachMoney, MdPhone, MdLocationOn } from 'react-icons/md';
+import CustomerStatementModal from './CustomerStatementModal';
+import { recordCustomerTransaction } from '../../utils/ledgerManager';
+import { MdPersonAdd, MdSearch, MdCardGiftcard, MdAttachMoney, MdPhone, MdLocationOn, MdHistory, MdPayment, MdClose } from 'react-icons/md';
 
 const CustomerManager = () => {
   const { userProfile } = useAuth();
@@ -18,6 +20,12 @@ const CustomerManager = () => {
   // Due Payment modal
   const [selectedCustForDue, setSelectedCustForDue] = useState(null);
   const [duePayAmount, setDuePayAmount] = useState('');
+  const [duePayMethod, setDuePayMethod] = useState('Cash');
+  const [duePayNote, setDuePayNote] = useState('');
+  const [submittingDue, setSubmittingDue] = useState(false);
+
+  // Statement modal
+  const [statementCustomer, setStatementCustomer] = useState(null);
 
   useEffect(() => {
     if (!shopId) return;
@@ -47,16 +55,30 @@ const CustomerManager = () => {
       return;
     }
 
+    setSubmittingDue(true);
     try {
-      const cRef = doc(db, 'shops', shopId, 'customers', selectedCustForDue.id);
-      await updateDoc(cRef, {
-        dueAmount: increment(-amount)
+      await recordCustomerTransaction(shopId, {
+        customerId: selectedCustForDue.id,
+        customerName: selectedCustForDue.name,
+        customerPhone: selectedCustForDue.phone || '',
+        type: 'payment',
+        billAmount: 0,
+        paidAmount: amount,
+        dueAmount: -amount,
+        paymentMethod: duePayMethod,
+        note: duePayNote.trim() || 'গ্রাহকের নিকট হতে বাকি আদায়',
+        recordedBy: userProfile?.name || userProfile?.email || 'Admin'
       });
-      toast.success(`${formatCurrency(amount)} বাকি আদায় সফল হয়েছে!`);
+
+      toast.success(`${formatCurrency(amount)} বাকি আদায় সফলভাবে সংরক্ষিত হয়েছে!`);
       setSelectedCustForDue(null);
       setDuePayAmount('');
+      setDuePayNote('');
     } catch (err) {
+      console.error("Error paying customer due:", err);
       toast.error('বাকি আপডেট করতে সমস্যা হয়েছে');
+    } finally {
+      setSubmittingDue(false);
     }
   };
 
@@ -194,27 +216,52 @@ const CustomerManager = () => {
                     )}
                   </td>
                   <td style={{ textAlign: 'center' }}>
-                  {(c.dueAmount || 0) > 0 && (
-                    <button
-                      onClick={() => {
-                        setSelectedCustForDue(c);
-                        setDuePayAmount((c.dueAmount || 0).toString());
-                      }}
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        border: '1px solid #10b981',
-                        background: '#ecfdf5',
-                        color: '#059669',
-                        fontWeight: '700',
-                        fontSize: '12px',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      বাকি আদায়
-                    </button>
-                  )}
-                </td>
+                    <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                      <button
+                        onClick={() => setStatementCustomer(c)}
+                        title="কাস্টমার হিসাব খাতা ও লেনদেন বিবরণী দেখুন"
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #bfdbfe',
+                          background: '#eff6ff',
+                          color: '#1d4ed8',
+                          fontWeight: '700',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '3px'
+                        }}
+                      >
+                        <MdHistory size={14} /> হিসাব খাতা
+                      </button>
+
+                      {(c.dueAmount || 0) > 0 && (
+                        <button
+                          onClick={() => {
+                            setSelectedCustForDue(c);
+                            setDuePayAmount((c.dueAmount || 0).toString());
+                          }}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #10b981',
+                            background: '#ecfdf5',
+                            color: '#059669',
+                            fontWeight: '700',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}
+                        >
+                          <MdPayment size={14} /> বাকি আদায়
+                        </button>
+                      )}
+                    </div>
+                  </td>
               </tr>
             );
           })}
@@ -240,43 +287,101 @@ const CustomerManager = () => {
 
       {/* Due Collection Modal */}
       {selectedCustForDue && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 110, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#ffffff', width: '100%', maxWidth: '380px', borderRadius: '14px', padding: '24px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: '800', marginBottom: '8px' }}>বাকি টাকা আদায়</h3>
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '16px' }}>
-              কাস্টমার: <b>{selectedCustForDue.name}</b> (বর্তমান বাকি: {formatCurrency(selectedCustForDue.dueAmount)})
-            </p>
-            <form onSubmit={handlePayDue}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '13px', fontWeight: '600', marginBottom: '6px' }}>
-                  জমা টাকা (৳)
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+          <div style={{ background: '#ffffff', width: '100%', maxWidth: '420px', borderRadius: '14px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: '800', margin: 0, color: '#0f172a' }}>বাকি টাকা আদায়</h3>
+              <button onClick={() => setSelectedCustForDue(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b' }}>
+                <MdClose size={20} />
+              </button>
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '14px' }}>
+              <div style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>{selectedCustForDue.name}</div>
+              <div style={{ fontSize: '12px', color: '#dc2626', fontWeight: '700' }}>
+                বর্তমান মোট বাকি: {formatCurrency(selectedCustForDue.dueAmount)}
+              </div>
+            </div>
+
+            <form onSubmit={handlePayDue} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: '700', color: '#334155', marginBottom: '4px' }}>
+                  জমা টাকা (৳) *
                 </label>
                 <input
                   type="number"
+                  step="any"
+                  min="0.01"
                   value={duePayAmount}
                   onChange={(e) => setDuePayAmount(e.target.value)}
                   required
-                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '16px', fontWeight: '700' }}
+                  placeholder="যেমন: 1500"
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1.5px solid #10b981', fontSize: '16px', fontWeight: '800', color: '#047857' }}
                 />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '4px' }}>
+                  পেমেন্ট মাধ্যম *
+                </label>
+                <select
+                  value={duePayMethod}
+                  onChange={(e) => setDuePayMethod(e.target.value)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px', fontWeight: '600' }}
+                >
+                  <option value="Cash">ক্যাশ (হাতে নগদ)</option>
+                  <option value="Bank">ব্যাংক অ্যাকাউন্ট</option>
+                  <option value="bKash">বিকাশ (bKash)</option>
+                  <option value="Nagad">নগদ (Nagad)</option>
+                  <option value="Agent Bank">এজেন্ট ব্যাংক</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
+                  অতিরিক্ত মন্তব্য / নোট
+                </label>
+                <input
+                  type="text"
+                  value={duePayNote}
+                  onChange={(e) => setDuePayNote(e.target.value)}
+                  placeholder="যেমন: মে মাসের বাকির আংশিক পরিশোধ"
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '6px' }}>
                 <button
                   type="button"
                   onClick={() => setSelectedCustForDue(null)}
-                  style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff' }}
+                  style={{ padding: '8px 16px', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#fff', cursor: 'pointer' }}
                 >
                   বাতিল
                 </button>
                 <button
                   type="submit"
-                  style={{ padding: '8px 18px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff', fontWeight: '700' }}
+                  disabled={submittingDue}
+                  style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', background: '#059669', color: '#fff', fontWeight: '700', cursor: 'pointer' }}
                 >
-                  আদায় নিশ্চিত করুন
+                  {submittingDue ? 'সংরক্ষণ হচ্ছে...' : 'আদায় নিশ্চিত করুন'}
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {/* Customer Statement Modal */}
+      {statementCustomer && (
+        <CustomerStatementModal
+          shopId={shopId}
+          customer={statementCustomer}
+          onClose={() => setStatementCustomer(null)}
+          onOpenPayment={(c) => {
+            setSelectedCustForDue(c);
+            setDuePayAmount((Number(c.dueAmount) || 0).toString());
+          }}
+        />
       )}
     </div>
   );

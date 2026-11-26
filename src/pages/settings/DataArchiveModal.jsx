@@ -343,6 +343,28 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
             </div>
           )}
 
+          {/* Automatic Opening Balance B/F Guarantee Box */}
+          <div style={{
+            background: '#f0fdf4',
+            border: '1px solid #86efac',
+            borderRadius: '10px',
+            padding: '10px 14px',
+            marginBottom: '16px',
+            fontSize: '12px',
+            color: '#15803d',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '8px'
+          }}>
+            <MdCheckCircle size={18} color="#16a34a" style={{ flexShrink: 0, marginTop: '1px' }} />
+            <div>
+              <strong>মহাজন ও গ্রাহকদের পূর্বের জের (Balance B/F) স্বয়ংক্রিয় সংরক্ষণ:</strong>
+              <div style={{ marginTop: '2px', color: '#166534' }}>
+                পুরাতন ডাটা আর্কাইভ ও ডিলিট করার সময় মহাজন ও গ্রাহকদের অবশিষ্ট দেনা-পাওনা হারাবে না। তাদের সমাপনী ব্যালেন্স পরবর্তী বছরের শুরুতে <strong>"পূর্বের জের"</strong> হিসেবে স্থানান্তরিত হয়ে নতুন হিসাব শুরু হবে।
+              </div>
+            </div>
+          </div>
+
           {/* Red Safety Warning & Confirmation */}
           <div style={{
             background: '#fff5f5',

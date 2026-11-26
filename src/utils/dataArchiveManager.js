@@ -231,11 +231,201 @@ export async function archiveAndPurgeSales({
     await batch.commit();
   }
 
+  // 7. Rollover & Archive Ledgers (পূর্বের জের টানা ও লেজার ট্রানজ্যাকশন আর্কাইভ)
+  let ledgerResult = null;
+  try {
+    ledgerResult = await rolloverAndArchiveLedgers({
+      shopId,
+      targetYear: resolvedYear,
+      cutoffDate,
+      onProgress
+    });
+  } catch (err) {
+    console.warn("Ledger rollover notice:", err);
+  }
+
   return {
     success: true,
     archivedCount: salesToArchive.length,
     year: resolvedYear,
     financialRollup,
-    backupFileName
+    backupFileName,
+    ledgerResult
+  };
+}
+
+/**
+ * Archives raw supplier & customer ledger transactions for a target year/cutoff,
+ * carries forward the exact ending balances as "পূর্বের জের (Opening Balance B/F)" for the new year,
+ * and purges old individual transactions from Firestore.
+ */
+export async function rolloverAndArchiveLedgers({
+  shopId,
+  targetYear,
+  cutoffDate,
+  onProgress
+}) {
+  if (!shopId) throw new Error("Shop ID প্রয়োজন");
+
+  const resolvedYear = Number(targetYear) || (cutoffDate ? new Date(cutoffDate).getFullYear() : new Date().getFullYear() - 1);
+  const nextYear = resolvedYear + 1;
+  const cutoffTimestamp = cutoffDate ? new Date(cutoffDate).getTime() : new Date(resolvedYear, 11, 31, 23, 59, 59).getTime();
+
+  if (onProgress) onProgress("মহাজন ও কাস্টমার খাতার পুরাতন লেনদেন স্ক্যান করা হচ্ছে...");
+
+  // 1. Fetch Supplier Transactions to archive
+  const suppTxSnap = await getDocs(collection(db, 'shops', shopId, 'supplier_transactions'));
+  const suppTxToArchive = [];
+  const supplierBalancesMap = {};
+
+  suppTxSnap.forEach((docItem) => {
+    const data = docItem.data();
+    const d = new Date(data.date || data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt || 0);
+    const timeVal = d.getTime();
+
+    if (!isNaN(timeVal) && timeVal <= cutoffTimestamp) {
+      suppTxToArchive.push({ id: docItem.id, ...data });
+      const sId = data.supplierId;
+      if (sId) {
+        if (!supplierBalancesMap[sId]) {
+          supplierBalancesMap[sId] = {
+            supplierId: sId,
+            supplierName: data.supplierName || '',
+            supplierCompany: data.supplierCompany || '',
+            supplierPhone: data.supplierPhone || '',
+            netDue: 0
+          };
+        }
+        supplierBalancesMap[sId].netDue += (Number(data.dueAmount) || 0);
+      }
+    }
+  });
+
+  // 2. Fetch Customer Transactions to archive
+  const custTxSnap = await getDocs(collection(db, 'shops', shopId, 'customer_transactions'));
+  const custTxToArchive = [];
+  const customerBalancesMap = {};
+
+  custTxSnap.forEach((docItem) => {
+    const data = docItem.data();
+    const d = new Date(data.date || data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt || 0);
+    const timeVal = d.getTime();
+
+    if (!isNaN(timeVal) && timeVal <= cutoffTimestamp) {
+      custTxToArchive.push({ id: docItem.id, ...data });
+      const cId = data.customerId;
+      if (cId) {
+        if (!customerBalancesMap[cId]) {
+          customerBalancesMap[cId] = {
+            customerId: cId,
+            customerName: data.customerName || '',
+            customerPhone: data.customerPhone || '',
+            netDue: 0
+          };
+        }
+        customerBalancesMap[cId].netDue += (Number(data.dueAmount) || 0);
+      }
+    }
+  });
+
+  if (onProgress) onProgress(`নতুন বছর ${nextYear} এর জন্য প্রারম্ভিক জের (Opening Balance B/F) তৈরি করা হচ্ছে...`);
+
+  // 3. Insert permanent Opening Balance (B/F) for Suppliers into the new year
+  for (const sId of Object.keys(supplierBalancesMap)) {
+    const sInfo = supplierBalancesMap[sId];
+    const roundedDue = Math.round(sInfo.netDue * 100) / 100;
+    if (roundedDue !== 0) {
+      await addDoc(collection(db, 'shops', shopId, 'supplier_transactions'), {
+        supplierId: sId,
+        supplierName: sInfo.supplierName,
+        supplierCompany: sInfo.supplierCompany || '',
+        supplierPhone: sInfo.supplierPhone || '',
+        type: 'opening_balance',
+        billAmount: 0,
+        paidAmount: 0,
+        dueAmount: roundedDue,
+        voucherNo: 'B/F',
+        note: `${resolvedYear} সাল সমাপনী পরবর্তী ${nextYear} সালের প্রারম্ভিক বকেয়া জের (Balance B/F)`,
+        year: nextYear,
+        date: new Date(nextYear, 0, 1, 0, 0, 0).toISOString(),
+        createdAt: serverTimestamp(),
+        recordedBy: 'System Rollover'
+      });
+    }
+  }
+
+  // 4. Insert permanent Opening Balance (B/F) for Customers into the new year
+  for (const cId of Object.keys(customerBalancesMap)) {
+    const cInfo = customerBalancesMap[cId];
+    const roundedDue = Math.round(cInfo.netDue * 100) / 100;
+    if (roundedDue !== 0) {
+      await addDoc(collection(db, 'shops', shopId, 'customer_transactions'), {
+        customerId: cId,
+        customerName: cInfo.customerName,
+        customerPhone: cInfo.customerPhone,
+        type: 'opening_balance',
+        billAmount: 0,
+        paidAmount: 0,
+        dueAmount: roundedDue,
+        invoiceNo: 'B/F',
+        note: `${resolvedYear} সাল সমাপনী পরবর্তী ${nextYear} সালের প্রারম্ভিক বাকি জের (Balance B/F)`,
+        year: nextYear,
+        date: new Date(nextYear, 0, 1, 0, 0, 0).toISOString(),
+        createdAt: serverTimestamp(),
+        recordedBy: 'System Rollover'
+      });
+    }
+  }
+
+  // 5. Download Backup JSON of Ledger Transactions (if any existed)
+  let ledgerBackupFileName = null;
+  if (suppTxToArchive.length > 0 || custTxToArchive.length > 0) {
+    ledgerBackupFileName = `MahinPOS_Ledger_Archive_${resolvedYear}_${new Date().toISOString().slice(0, 10)}.json`;
+    const ledgerPayload = {
+      platform: 'MahinPOS',
+      archiveType: 'Ledgers_Purge_Archive_With_Balance_BF',
+      shopId,
+      year: resolvedYear,
+      nextYearOpening: nextYear,
+      totalSupplierTx: suppTxToArchive.length,
+      totalCustomerTx: custTxToArchive.length,
+      supplierCarriedBalances: supplierBalancesMap,
+      customerCarriedBalances: customerBalancesMap,
+      supplierTransactions: suppTxToArchive,
+      customerTransactions: custTxToArchive
+    };
+    downloadArchiveFile(ledgerPayload, ledgerBackupFileName);
+  }
+
+  if (onProgress) onProgress(`পুরাতন লেজার ট্রানজ্যাকশন ক্লিন করা হচ্ছে...`);
+
+  // 6. Delete old supplier transactions in batches of 400
+  const batchSize = 400;
+  for (let i = 0; i < suppTxToArchive.length; i += batchSize) {
+    const chunk = suppTxToArchive.slice(i, i + batchSize);
+    const batch = writeBatch(db);
+    chunk.forEach((t) => {
+      batch.delete(doc(db, 'shops', shopId, 'supplier_transactions', t.id));
+    });
+    await batch.commit();
+  }
+
+  // 7. Delete old customer transactions in batches of 400
+  for (let i = 0; i < custTxToArchive.length; i += batchSize) {
+    const chunk = custTxToArchive.slice(i, i + batchSize);
+    const batch = writeBatch(db);
+    chunk.forEach((t) => {
+      batch.delete(doc(db, 'shops', shopId, 'customer_transactions', t.id));
+    });
+    await batch.commit();
+  }
+
+  return {
+    success: true,
+    archivedSupplierTxCount: suppTxToArchive.length,
+    archivedCustomerTxCount: custTxToArchive.length,
+    suppliersCount: Object.keys(supplierBalancesMap).length,
+    customersCount: Object.keys(customerBalancesMap).length,
+    ledgerBackupFileName
   };
 }
