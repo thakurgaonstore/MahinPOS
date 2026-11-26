@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { doc, updateDoc, addDoc, collection, increment, serverTimestamp } from 'firebase/firestore';
+import { doc, updateDoc, addDoc, collection, increment, getDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
+import { restoreBatchStock } from '../../utils/fifoInventoryManager';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
 import {
@@ -144,9 +145,21 @@ const ProductReturnModal = ({ shopId, invoice, userProfile, onClose, onSuccess }
           if (item.productId) {
             try {
               const productRef = doc(db, 'shops', shopId, 'products', item.productId);
+              const prodSnap = await getDoc(productRef);
+              const prodData = prodSnap.exists() ? prodSnap.data() : null;
+              const currentBatches = prodData?.batches || [];
+              const restoredBatches = restoreBatchStock(
+                currentBatches,
+                item.returnQty,
+                item.costPrice || prodData?.costPrice || 0,
+                item.batchAllocations || []
+              );
+
               await updateDoc(productRef, {
                 stock: increment(item.returnQty),
-                totalSold: increment(-item.returnQty)
+                totalSold: increment(-item.returnQty),
+                batches: restoredBatches,
+                updatedAt: serverTimestamp()
               });
             } catch (err) {
               console.warn(`Could not restock product ${item.productId}:`, err);

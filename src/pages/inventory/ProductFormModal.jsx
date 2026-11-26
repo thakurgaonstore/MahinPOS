@@ -5,6 +5,7 @@ import { uploadToCloudinary } from '../../utils/imageUploadHelper';
 import { generateRandomBarcode } from '../../utils/barcodeHelper';
 import { toast } from 'react-hot-toast';
 import { MdClose, MdCloudUpload, MdQrCode, MdSave } from 'react-icons/md';
+import { addBatchToProduct } from '../../utils/fifoInventoryManager';
 
 const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCategories = [] }) => {
   const [name, setName] = useState(productToEdit?.name || '');
@@ -103,17 +104,34 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
       };
 
       if (productToEdit?.id) {
+        if (productToEdit.batches) {
+          productData.batches = productToEdit.batches;
+        }
         await setDoc(doc(db, 'shops', shopId, 'products', productToEdit.id), productData, { merge: true });
         toast.success('পণ্য আপডেট করা হয়েছে!');
       } else {
         productData.createdAt = serverTimestamp();
         productData.totalSold = 0;
+
+        const initQty = Number(stock) || 0;
+        const initCost = Number(costPrice) || 0;
+
+        if (initQty > 0 || initCost > 0) {
+          productData.batches = addBatchToProduct([], {
+            quantity: initQty,
+            costPrice: initCost,
+            supplierName: 'প্রাথমিক ইনভেন্টরি এন্ট্রি',
+            voucherNo: 'INIT-' + finalBarcode.slice(-6),
+            notes: 'নতুন পণ্য তৈরির সময় প্রারম্ভিক স্টক রেকর্ড'
+          });
+        } else {
+          productData.batches = [];
+        }
+
         const newDocRef = await addDoc(collection(db, 'shops', shopId, 'products'), productData);
 
         // Record stock log for newly created product if initial stock > 0
-        if (Number(stock) > 0 || Number(costPrice) > 0) {
-          const initQty = Number(stock) || 0;
-          const initCost = Number(costPrice) || 0;
+        if (initQty > 0 || initCost > 0) {
           await addDoc(collection(db, 'shops', shopId, 'stock_logs'), {
             type: 'initial_stock',
             productId: newDocRef.id,
@@ -133,11 +151,12 @@ const ProductFormModal = ({ shopId, productToEdit, onClose, onSave, existingCate
             supplierName: 'প্রাথমিক ইনভেন্টরি এন্ট্রি',
             voucherNo: 'INIT-' + finalBarcode.slice(-6),
             notes: 'নতুন পণ্য তৈরির সময় প্রারম্ভিক স্টক রেকর্ড',
+            isFifoBatch: true,
             createdAt: serverTimestamp()
           });
         }
 
-        toast.success('নতুন পণ্য সফলভাবে তৈরি হয়েছে!');
+        toast.success('নতুন পণ্য সফলভাবে তৈরি হয়েছে! (FIFO সক্রিয়)');
       }
 
       if (onSave) onSave();

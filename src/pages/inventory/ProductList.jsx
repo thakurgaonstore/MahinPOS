@@ -9,8 +9,14 @@ import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import ProductFormModal from './ProductFormModal';
 import ProductRestockModal from './ProductRestockModal';
+import ProductBatchDetailsModal from './ProductBatchDetailsModal';
 import ProductWasteModal from './ProductWasteModal';
 import BarcodePrintCenter from './BarcodePrintCenter';
+import {
+  ensureProductBatches,
+  addBatchToProduct,
+  calculateProductValuation
+} from '../../utils/fifoInventoryManager';
 
 import {
   MdAdd,
@@ -25,7 +31,8 @@ import {
   MdCancel,
   MdTableChart,
   MdInfo,
-  MdAddShoppingCart
+  MdAddShoppingCart,
+  MdLayers
 } from 'react-icons/md';
 
 const ProductList = () => {
@@ -42,6 +49,7 @@ const ProductList = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [restockProduct, setRestockProduct] = useState(null);
+  const [batchModalProduct, setBatchModalProduct] = useState(null);
   const [wasteProduct, setWasteProduct] = useState(null);
   const [isWasteModalOpen, setIsWasteModalOpen] = useState(false);
   const [barcodeProduct, setBarcodeProduct] = useState(null);
@@ -91,9 +99,9 @@ const ProductList = () => {
   const totalPages = Math.ceil(filtered.length / perPage) || 1;
   const paginatedProducts = filtered.slice((page - 1) * perPage, page * perPage);
 
-  // Total Stock Valuation
-  const totalStockCostValue = products.reduce((sum, p) => sum + ((Number(p.costPrice) || 0) * (Math.max(0, Number(p.stock)) || 0)), 0);
-  const totalStockRetailValue = products.reduce((sum, p) => sum + ((Number(p.retailPrice) || 0) * (Math.max(0, Number(p.stock)) || 0)), 0);
+  // Total Stock Valuation (FIFO Batches Aware)
+  const totalStockCostValue = products.reduce((sum, p) => sum + calculateProductValuation(p).totalCostValue, 0);
+  const totalStockRetailValue = products.reduce((sum, p) => sum + ((Number(p.retailPrice) || Number(p.sellingPrice) || 0) * (Math.max(0, Number(p.stock)) || 0)), 0);
   const totalStockQty = products.reduce((sum, p) => sum + Math.max(0, Number(p.stock) || 0), 0);
 
   // Delete product
@@ -256,30 +264,21 @@ const ProductList = () => {
           );
 
           if (existing) {
-            // UPDATE existing product
-            await setDoc(doc(db, 'shops', shopId, 'products', existing.id), {
-              name,
-              nameBn: nameBn || existing.nameBn || '',
-              barcode: barcode || existing.barcode || generateRandomBarcode(),
-              category: category || existing.category || 'General',
-              costPrice: costPrice > 0 ? costPrice : (existing.costPrice || 0),
-              sellingPrice: sellingPrice > 0 ? sellingPrice : (existing.sellingPrice || 0),
-              price: sellingPrice > 0 ? sellingPrice : (existing.price || 0),
-              wholesalePrice: wholesalePrice > 0 ? wholesalePrice : (existing.wholesalePrice || 0),
-              dealerPrice: dealerPrice > 0 ? dealerPrice : (existing.dealerPrice || 0),
-              stock: stock !== 0 ? stock : (existing.stock || 0),
-              unit: unit || existing.unit || 'টি (Pcs)',
-              isLoose: isLoose !== undefined ? isLoose : (existing.isLoose || false),
-              minStockAlert: minStockAlert || existing.minStockAlert || 5,
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-
-            // Record stock log if stock increased or re-imported
             const prevStock = Number(existing.stock) || 0;
             const newStockVal = stock !== 0 ? stock : prevStock;
+            let updatedBatches = existing.batches || ensureProductBatches(existing);
+
             if (newStockVal > prevStock) {
               const addedQty = newStockVal - prevStock;
               const unitCost = costPrice > 0 ? costPrice : (existing.costPrice || 0);
+              updatedBatches = addBatchToProduct(updatedBatches, {
+                quantity: addedQty,
+                costPrice: unitCost,
+                supplierName: 'এক্সেল শিট আপডেট',
+                voucherNo: 'EXCEL-UPD',
+                notes: 'এক্সেল ফাইল আপলোডের মাধ্যমে পণ্য স্টক আপডেট'
+              });
+
               await addDoc(collection(db, 'shops', shopId, 'stock_logs'), {
                 type: 'excel_import',
                 productId: existing.id,
@@ -303,10 +302,37 @@ const ProductList = () => {
               });
             }
 
+            // UPDATE existing product
+            await setDoc(doc(db, 'shops', shopId, 'products', existing.id), {
+              name,
+              nameBn: nameBn || existing.nameBn || '',
+              barcode: barcode || existing.barcode || generateRandomBarcode(),
+              category: category || existing.category || 'General',
+              costPrice: costPrice > 0 ? costPrice : (existing.costPrice || 0),
+              sellingPrice: sellingPrice > 0 ? sellingPrice : (existing.sellingPrice || 0),
+              price: sellingPrice > 0 ? sellingPrice : (existing.price || 0),
+              wholesalePrice: wholesalePrice > 0 ? wholesalePrice : (existing.wholesalePrice || 0),
+              dealerPrice: dealerPrice > 0 ? dealerPrice : (existing.dealerPrice || 0),
+              stock: stock !== 0 ? stock : (existing.stock || 0),
+              batches: updatedBatches,
+              unit: unit || existing.unit || 'টি (Pcs)',
+              isLoose: isLoose !== undefined ? isLoose : (existing.isLoose || false),
+              minStockAlert: minStockAlert || existing.minStockAlert || 5,
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+
             updatedCount++;
           } else {
             // INSERT new product
             const finalBarcode = barcode || generateRandomBarcode();
+            const initialBatches = stock > 0 ? addBatchToProduct([], {
+              quantity: stock,
+              costPrice: costPrice,
+              supplierName: 'এক্সেল শিট আপলোড',
+              voucherNo: 'EXCEL-' + (finalBarcode ? finalBarcode.slice(-6) : Date.now().toString().slice(-6)),
+              notes: 'এক্সেল ফাইল বাল্ক আপলোডের মাধ্যমে পণ্য প্রারম্ভিক স্টক এন্ট্রি'
+            }) : [];
+
             const newProdRef = await addDoc(collection(db, 'shops', shopId, 'products'), {
               name,
               nameBn,
@@ -319,6 +345,7 @@ const ProductList = () => {
               wholesalePrice,
               dealerPrice,
               stock,
+              batches: initialBatches,
               unit,
               isLoose,
               minStockAlert,
@@ -707,7 +734,32 @@ const ProductList = () => {
                   </td>
                   {isOwnerOrManager && (
                     <td>
-                      <span style={{ color: '#475569', fontWeight: '600' }}>{formatCurrency(p.costPrice || 0)}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <span style={{ color: '#475569', fontWeight: '700' }}>{formatCurrency(p.costPrice || 0)}</span>
+                        <button
+                          onClick={() => setBatchModalProduct(p)}
+                          title="পৃথক ক্রয়মূল্যের FIFO ব্যাচ ও রিস্টক হিস্ট্রি দেখুন"
+                          style={{
+                            background: '#eff6ff',
+                            border: '1px solid #bfdbfe',
+                            color: '#1d4ed8',
+                            borderRadius: '4px',
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            padding: '2px 5px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            width: 'fit-content'
+                          }}
+                        >
+                          <MdLayers size={11} />
+                          {p.batches && p.batches.filter(b => (Number(b.remainingQty) || 0) > 0).length > 1
+                            ? `${p.batches.filter(b => (Number(b.remainingQty) || 0) > 0).length} ব্যাচ (FIFO)`
+                            : 'ব্যাচ হিস্ট্রি'}
+                        </button>
+                      </div>
                     </td>
                   )}
                   <td>
@@ -751,25 +803,47 @@ const ProductList = () => {
                   <td style={{ textAlign: 'center' }}>
                     <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
                       {isOwnerOrManager && (
-                        <button
-                          onClick={() => setRestockProduct(p)}
-                          title="পণ্য রিস্টক ও গড় ক্রয় মূল্য সমন্বয় করুন"
-                          style={{
-                            padding: '5px 8px',
-                            background: '#ecfdf5',
-                            border: '1px solid #a7f3d0',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            color: '#059669',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '3px'
-                          }}
-                        >
-                          <MdAddShoppingCart size={13} /> রিস্টক
-                        </button>
+                        <>
+                          <button
+                            onClick={() => setRestockProduct(p)}
+                            title="পণ্য রিস্টক ও নতুন ব্যাচ এন্ট্রি করুন"
+                            style={{
+                              padding: '5px 8px',
+                              background: '#ecfdf5',
+                              border: '1px solid #a7f3d0',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              color: '#059669',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                          >
+                            <MdAddShoppingCart size={13} /> রিস্টক
+                          </button>
+
+                          <button
+                            onClick={() => setBatchModalProduct(p)}
+                            title="FIFO রিস্টক ব্যাচ হিস্ট্রি ও অবশিষ্ট মজুদ দেখুন"
+                            style={{
+                              padding: '5px 8px',
+                              background: '#eff6ff',
+                              border: '1px solid #bfdbfe',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              color: '#2563eb',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                          >
+                            <MdLayers size={13} /> ব্যাচ
+                          </button>
+                        </>
                       )}
 
                       {/* Waste / Damaged Button */}
@@ -883,12 +957,21 @@ const ProductList = () => {
         />
       )}
 
-      {/* Restock & Weighted Average Cost Modal */}
+      {/* Restock & FIFO Multi-Batch Modal */}
       {restockProduct && (
         <ProductRestockModal
           shopId={shopId}
           product={restockProduct}
           onClose={() => setRestockProduct(null)}
+        />
+      )}
+
+      {/* FIFO Batch Details Viewer Modal */}
+      {batchModalProduct && (
+        <ProductBatchDetailsModal
+          product={batchModalProduct}
+          onClose={() => setBatchModalProduct(null)}
+          onOpenRestock={(prod) => setRestockProduct(prod)}
         />
       )}
 

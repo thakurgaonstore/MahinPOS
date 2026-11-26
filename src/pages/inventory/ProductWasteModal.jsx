@@ -3,6 +3,7 @@ import { doc, updateDoc, addDoc, collection, increment, serverTimestamp } from '
 import { db } from '../../firebase/config';
 import { formatCurrency } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
+import { ensureProductBatches, depleteBatchesFIFO } from '../../utils/fifoInventoryManager';
 import {
   MdClose,
   MdWarning,
@@ -72,10 +73,20 @@ const ProductWasteModal = ({ shopId, product, allProducts = [], userProfile, onC
     try {
       const selectedTypeObj = WASTE_TYPES.find((t) => t.id === wasteType) || WASTE_TYPES[0];
 
-      // 1. Decrement Product Stock
+      // 1. Deplete FIFO Batches and decrement stock
+      const existingBatches = ensureProductBatches(activeProduct);
+      const { updatedBatches, totalCost, unitCost, allocations } = depleteBatchesFIFO(
+        existingBatches,
+        numQty,
+        Number(costPrice) || 0
+      );
+
+      const actualLossAmount = totalCost > 0 ? totalCost : totalLoss;
+
       const prodRef = doc(db, 'shops', shopId, 'products', activeProduct.id);
       await updateDoc(prodRef, {
         stock: increment(-numQty),
+        batches: updatedBatches,
         updatedAt: serverTimestamp()
       });
 
@@ -87,9 +98,10 @@ const ProductWasteModal = ({ shopId, product, allProducts = [], userProfile, onC
         barcode: activeProduct.barcode || '',
         unit,
         isLoose,
-        costPrice,
+        costPrice: unitCost,
         quantity: numQty,
-        totalLossAmount: totalLoss,
+        totalLossAmount: actualLossAmount,
+        batchAllocations: allocations,
         type: wasteType,
         typeLabel: selectedTypeObj.label,
         reason: reasonNote.trim() || 'কোনো কারণ উল্লেখ নেই',
@@ -98,13 +110,13 @@ const ProductWasteModal = ({ shopId, product, allProducts = [], userProfile, onC
       });
 
       // 3. Add Expense Entry to Accounts
-      if (totalLoss > 0) {
+      if (actualLossAmount > 0) {
         await addDoc(collection(db, 'shops', shopId, 'expenses'), {
           title: `${selectedTypeObj.label}: ${activeProduct.name}`,
-          amount: totalLoss,
+          amount: actualLossAmount,
           category: selectedTypeObj.expenseCat,
           paymentMethod: 'Adjustment (সমন্বয়)',
-          note: `কর্তন: ${numQty} ${unit} | প্রতি একক ক্রয়মূল্য: ৳${costPrice} | কারণ: ${reasonNote.trim() || 'উল্লেখ নেই'}`,
+          note: `কর্তন: ${numQty} ${unit} (FIFO ব্যাচ থেকে সমন্বিত) | প্রতি একক ক্রয়মূল্য: ৳${unitCost} | কারণ: ${reasonNote.trim() || 'উল্লেখ নেই'}`,
           date: new Date().toISOString().slice(0, 10),
           recordedBy: userProfile?.name || userProfile?.email || 'Admin',
           isAutoWaste: true,

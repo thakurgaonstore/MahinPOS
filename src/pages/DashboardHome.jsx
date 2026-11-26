@@ -10,6 +10,7 @@ import BusinessCapitalSummaryCard from '../components/accounts/BusinessCapitalSu
 import BankAccountManagerModal from '../components/accounts/BankAccountManagerModal';
 import TransferFundModal from '../components/accounts/TransferFundModal';
 import AddMoneyModal from '../components/accounts/AddMoneyModal';
+import { calculateProductValuation } from '../utils/fifoInventoryManager';
 import {
   subscribeToAccountBalances,
   subscribeToBankAccounts,
@@ -204,12 +205,8 @@ const DashboardHome = () => {
     return stock <= minAlert;
   }).length;
 
-  // 1.1 Total Stock Valuation (সকল স্টকের মোট মূল্য ও কোয়ান্টিটি)
-  const totalStockCostValue = products.reduce((sum, p) => {
-    const qty = Math.max(0, Number(p.stock) || 0);
-    const cost = Number(p.costPrice) || 0;
-    return sum + (qty * cost);
-  }, 0);
+  // 1.1 Total Stock Valuation (সকল স্টকের মোট মূল্য ও কোয়ান্টিটি - FIFO Batches Aware)
+  const totalStockCostValue = products.reduce((sum, p) => sum + calculateProductValuation(p).totalCostValue, 0);
 
   const totalStockRetailValue = products.reduce((sum, p) => {
     const qty = Math.max(0, Number(p.stock) || 0);

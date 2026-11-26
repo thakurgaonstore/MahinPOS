@@ -19,6 +19,7 @@ import { toast } from 'react-hot-toast';
 import QuickAddCustomerModal from '../../components/QuickAddCustomerModal';
 import InvoiceViewModal from '../invoices/InvoiceViewModal';
 import { creditAccountFromSale } from '../../utils/financialAccountsManager';
+import { ensureProductBatches, depleteBatchesFIFO } from '../../utils/fifoInventoryManager';
 
 // Icons
 import {
@@ -432,10 +433,66 @@ const POSTerminal = () => {
         ? Math.max(0, customerPrevPoints + pointsEarned - pointsToRedeem)
         : (Number(selectedCustomer?.rewardPoints) || 0);
 
+      // FIFO Batch Depletion: Compute exact batch allocations and COGS for each line item
+      const finalizedItems = [];
+      const productBatchUpdates = [];
+
+      for (const item of cart) {
+        let effectiveCost = Number(item.costPrice) || 0;
+        let cogs = effectiveCost * (Number(item.quantity) || 0);
+        let allocations = [];
+        let updatedBatches = null;
+
+        try {
+          const pDocRef = doc(db, 'shops', shopId, 'products', item.productId);
+          const pSnap = await getDoc(pDocRef);
+          if (pSnap.exists()) {
+            const pData = pSnap.data();
+            const existingBatches = ensureProductBatches(pData);
+            const depletion = depleteBatchesFIFO(
+              existingBatches,
+              item.quantity,
+              effectiveCost || Number(pData.costPrice) || 0
+            );
+
+            effectiveCost = depletion.unitCost;
+            cogs = depletion.totalCost;
+            allocations = depletion.allocations;
+            updatedBatches = depletion.updatedBatches;
+
+            productBatchUpdates.push({
+              ref: pDocRef,
+              qty: item.quantity,
+              batches: updatedBatches
+            });
+          } else {
+            productBatchUpdates.push({
+              ref: pDocRef,
+              qty: item.quantity,
+              batches: null
+            });
+          }
+        } catch (err) {
+          console.warn("FIFO batch calculation error for item:", item.productId, err);
+          productBatchUpdates.push({
+            ref: doc(db, 'shops', shopId, 'products', item.productId),
+            qty: item.quantity,
+            batches: null
+          });
+        }
+
+        finalizedItems.push({
+          ...item,
+          costPrice: effectiveCost,
+          cogs: cogs,
+          batchAllocations: allocations
+        });
+      }
+
       const saleData = {
         invoiceNo,
         shopId,
-        items: cart,
+        items: finalizedItems,
         subtotal,
         discountAmount: calculatedDiscount,
         pricingTier,
@@ -475,16 +532,20 @@ const POSTerminal = () => {
         });
       }
 
-      // 2. Decrement Products Stock
-      for (const item of cart) {
+      // 2. Decrement Products Stock and update FIFO Batches
+      for (const update of productBatchUpdates) {
         try {
-          const pDoc = doc(db, 'shops', shopId, 'products', item.productId);
-          await updateDoc(pDoc, {
-            stock: increment(-item.quantity),
-            totalSold: increment(item.quantity)
-          });
+          const updatePayload = {
+            stock: increment(-update.qty),
+            totalSold: increment(update.qty),
+            updatedAt: serverTimestamp()
+          };
+          if (update.batches) {
+            updatePayload.batches = update.batches;
+          }
+          await updateDoc(update.ref, updatePayload);
         } catch (e) {
-          console.warn("Stock decrement error:", e);
+          console.warn("Stock decrement & FIFO batch update error:", e);
         }
       }
 
