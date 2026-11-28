@@ -13,14 +13,18 @@ import {
 } from 'react-icons/md';
 import {
   subscribeToSupplierTransactions,
-  computeLedgerStatement
+  computeLedgerStatement,
+  getTxTimestamp,
+  syncSupplierDueBalance
 } from '../../utils/ledgerManager';
+import { toast } from 'react-hot-toast';
 
 const SupplierStatementModal = ({ shopId, supplier, onClose, onOpenPayment }) => {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(String(currentYear));
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!shopId || !supplier?.id) return;
@@ -35,8 +39,8 @@ const SupplierStatementModal = ({ shopId, supplier, onClose, onOpenPayment }) =>
   // Detected years from transactions
   const detectedYears = [...new Set(
     transactions.map((t) => {
-      const d = new Date(t.date || t.createdAt?.toDate ? t.createdAt.toDate() : t.createdAt || 0);
-      return !isNaN(d.getTime()) ? String(d.getFullYear()) : String(currentYear);
+      const ts = getTxTimestamp(t);
+      return ts > 0 ? String(new Date(ts).getFullYear()) : String(currentYear);
     })
   )].sort((a, b) => Number(b) - Number(a));
 
@@ -46,9 +50,27 @@ const SupplierStatementModal = ({ shopId, supplier, onClose, onOpenPayment }) =>
 
   const { openingBalance, closingBalance, statementRows } = computeLedgerStatement(
     transactions,
-    selectedYear,
-    supplier?.duePayable || 0
+    selectedYear
   );
+
+  // All-time exact balance from ledger transactions
+  const allTimeBalance = transactions.length > 0
+    ? computeLedgerStatement(transactions, 'all').closingBalance
+    : (Number(supplier?.duePayable) || 0);
+  const storedDue = Number(supplier?.duePayable) || 0;
+  const hasBalanceMismatch = transactions.length > 0 && Math.abs(storedDue - allTimeBalance) > 0.01;
+
+  const handleSyncBalance = async () => {
+    setSyncing(true);
+    try {
+      await syncSupplierDueBalance(shopId, supplier.id, allTimeBalance);
+      toast.success(`বাকি হিসাব ${formatCurrency(allTimeBalance)} তে সমন্বয় করা হয়েছে!`);
+    } catch (err) {
+      toast.error('সমন্বয় করতে সমস্যা হয়েছে');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Period stats
   const periodPurchases = statementRows
@@ -264,8 +286,28 @@ const SupplierStatementModal = ({ shopId, supplier, onClose, onOpenPayment }) =>
               বর্তমান সমাপনী পাওনা (Due)
             </span>
             <span style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626' }}>
-              {formatCurrency(supplier?.duePayable || closingBalance)}
+              {formatCurrency(allTimeBalance)}
             </span>
+            {hasBalanceMismatch && (
+              <div style={{ marginTop: '4px' }}>
+                <button
+                  onClick={handleSyncBalance}
+                  disabled={syncing}
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: '700',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '2px 7px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {syncing ? 'সিঙ্ক হচ্ছে...' : `সমন্বয় করুন (পূর্বের ${formatCurrency(storedDue)} → ${formatCurrency(allTimeBalance)})`}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -332,6 +374,10 @@ const SupplierStatementModal = ({ shopId, supplier, onClose, onOpenPayment }) =>
                           <div style={{ color: '#854d0e', display: 'flex', alignItems: 'center', gap: '4px' }}>
                             📌 <span>{row.title || 'পূর্বের জের'}</span>
                           </div>
+                        ) : row.type === 'opening_balance' ? (
+                          <span style={{ color: '#854d0e', fontWeight: '700', background: '#fef9c3', padding: '2px 8px', borderRadius: '12px', fontSize: '11px' }}>
+                            📌 প্রারম্ভিক বকেয়া জের
+                          </span>
                         ) : isPurchase ? (
                           <span style={{ color: '#1e40af', fontWeight: '700', background: '#dbeafe', padding: '2px 8px', borderRadius: '12px', fontSize: '11px' }}>
                             📦 বাকিতে পণ্য ক্রয়

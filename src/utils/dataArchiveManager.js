@@ -5,10 +5,12 @@ import {
   query,
   where,
   doc,
+  addDoc,
   setDoc,
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
+import { getTxTimestamp } from './ledgerManager';
 
 /**
  * Computes a condensed financial summary from a list of raw sales and expenses
@@ -280,10 +282,9 @@ export async function rolloverAndArchiveLedgers({
 
   suppTxSnap.forEach((docItem) => {
     const data = docItem.data();
-    const d = new Date(data.date || data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt || 0);
-    const timeVal = d.getTime();
+    const timeVal = getTxTimestamp(data);
 
-    if (!isNaN(timeVal) && timeVal <= cutoffTimestamp) {
+    if (timeVal > 0 && timeVal <= cutoffTimestamp) {
       suppTxToArchive.push({ id: docItem.id, ...data });
       const sId = data.supplierId;
       if (sId) {
@@ -308,10 +309,9 @@ export async function rolloverAndArchiveLedgers({
 
   custTxSnap.forEach((docItem) => {
     const data = docItem.data();
-    const d = new Date(data.date || data.createdAt?.toDate ? data.createdAt.toDate() : data.createdAt || 0);
-    const timeVal = d.getTime();
+    const timeVal = getTxTimestamp(data);
 
-    if (!isNaN(timeVal) && timeVal <= cutoffTimestamp) {
+    if (timeVal > 0 && timeVal <= cutoffTimestamp) {
       custTxToArchive.push({ id: docItem.id, ...data });
       const cId = data.customerId;
       if (cId) {

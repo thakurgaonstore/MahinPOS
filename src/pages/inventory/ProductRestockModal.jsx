@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, updateDoc, addDoc, collection, serverTimestamp, getDocs } from 'firebase/firestore';
+import { doc, collection, serverTimestamp, getDocs, writeBatch, increment } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { toast } from 'react-hot-toast';
@@ -125,12 +125,14 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
         createdAt: new Date().toISOString()
       });
 
-      // 2. Update Product Document with new Stock, FIFO Batches, Latest Cost Price, and Selling Prices
+      // 2. Execute Product Update + Stock Log + Supplier Update + Supplier Tx + Financial Debit in ONE atomic writeBatch
+      const batch = writeBatch(db);
+
       const productRef = doc(db, 'shops', shopId, 'products', product.id);
-      await updateDoc(productRef, {
+      batch.update(productRef, {
         stock: finalStock,
         batches: updatedBatches,
-        costPrice: unitCost, // Keep latest restock price as primary reference
+        costPrice: unitCost,
         sellingPrice: rPrice,
         price: rPrice,
         wholesalePrice: wPrice,
@@ -139,8 +141,8 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
         updatedAt: serverTimestamp()
       });
 
-      // 3. Record Stock Inward / Restock Audit Log
-      await addDoc(collection(db, 'shops', shopId, 'stock_logs'), {
+      const logRef = doc(collection(db, 'shops', shopId, 'stock_logs'));
+      batch.set(logRef, {
         type: 'restock',
         productId: product.id,
         productName: product.name,
@@ -166,44 +168,72 @@ const ProductRestockModal = ({ shopId, product, onClose, onSuccess }) => {
         createdAt: serverTimestamp()
       });
 
-      // 4. Link to Supplier Ledger if a supplier is linked or if there is due
+      // 3. Link to Supplier Ledger if a supplier is specified
       if (finalSupplierName || resolvedSupplierId) {
-        try {
-          if (!resolvedSupplierId) {
-            // Find existing supplier by name or create new supplier doc
-            const match = suppliersList.find((s) => s.name.toLowerCase() === finalSupplierName.toLowerCase());
-            if (match) {
-              resolvedSupplierId = match.id;
-            } else {
-              const newSuppRef = await addDoc(collection(db, 'shops', shopId, 'suppliers'), {
-                name: finalSupplierName,
-                company: '',
-                phone: '',
-                totalPurchased: 0,
-                duePayable: 0,
-                createdAt: serverTimestamp()
-              });
-              resolvedSupplierId = newSuppRef.id;
-            }
-          }
+        let suppDocRef = resolvedSupplierId ? doc(db, 'shops', shopId, 'suppliers', resolvedSupplierId) : null;
 
-          if (resolvedSupplierId) {
-            await recordSupplierTransaction(shopId, {
-              supplierId: resolvedSupplierId,
-              supplierName: finalSupplierName,
-              type: 'purchase_due',
-              billAmount: newBatchTotalCost,
-              paidAmount: actualPaid,
-              dueAmount: actualDue,
-              paymentMethod: actualPaid > 0 ? 'Cash' : 'Due',
-              voucherNo: voucherNo.trim() || `RESTOCK-${Date.now().toString().slice(-6)}`,
-              note: `"${product.name}" রিস্টক ব্যাচ (${addQty} ${product.unit || 'টি'})` + (notes ? ` - ${notes}` : '')
+        if (!suppDocRef) {
+          const match = suppliersList.find((s) => s.name.toLowerCase() === finalSupplierName.toLowerCase());
+          if (match) {
+            resolvedSupplierId = match.id;
+            suppDocRef = doc(db, 'shops', shopId, 'suppliers', match.id);
+          } else {
+            suppDocRef = doc(collection(db, 'shops', shopId, 'suppliers'));
+            resolvedSupplierId = suppDocRef.id;
+            batch.set(suppDocRef, {
+              name: finalSupplierName,
+              company: '',
+              phone: '',
+              totalPurchased: newBatchTotalCost,
+              duePayable: actualDue,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              lastTransactionAt: serverTimestamp()
             });
           }
-        } catch (suppErr) {
-          console.warn("Could not log supplier due transaction on restock:", suppErr);
         }
+
+        // Update existing supplier if it wasn't newly created above
+        if (resolvedSupplierId && suppliersList.some((s) => s.id === resolvedSupplierId)) {
+          batch.update(suppDocRef, {
+            duePayable: increment(actualDue),
+            totalPurchased: increment(newBatchTotalCost),
+            updatedAt: serverTimestamp(),
+            lastTransactionAt: serverTimestamp()
+          });
+        }
+
+        const suppTxRef = doc(collection(db, 'shops', shopId, 'supplier_transactions'));
+        const now = new Date();
+        batch.set(suppTxRef, {
+          supplierId: resolvedSupplierId,
+          supplierName: finalSupplierName,
+          supplierCompany: '',
+          supplierPhone: '',
+          type: 'purchase_due',
+          billAmount: newBatchTotalCost,
+          paidAmount: actualPaid,
+          dueAmount: actualDue,
+          paymentMethod: actualPaid > 0 ? 'Cash' : 'Due',
+          voucherNo: voucherNo.trim() || `RESTOCK-${Date.now().toString().slice(-6)}`,
+          note: `"${product.name}" রিস্টক ব্যাচ (${addQty} ${product.unit || 'টি'})` + (notes ? ` - ${notes}` : ''),
+          year: now.getFullYear(),
+          date: now.toISOString(),
+          recordedBy: 'Admin',
+          createdAt: serverTimestamp()
+        });
       }
+
+      // 4. Auto-debit cash if any amount was paid during restock
+      if (actualPaid > 0) {
+        const balancesDocRef = doc(db, 'shops', shopId, 'financial_accounts', 'balances');
+        batch.set(balancesDocRef, {
+          cash: increment(-actualPaid),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      }
+
+      await batch.commit();
 
       toast.success(`"${product.name}" এর নতুন ব্যাচ (৳${unitCost} দরে ${addQty} ${product.unit || 'টি'}) সফলভাবে যুক্ত হয়েছে!`);
       if (onSuccess) onSuccess();

@@ -12,14 +12,18 @@ import {
 } from 'react-icons/md';
 import {
   subscribeToCustomerTransactions,
-  computeLedgerStatement
+  computeLedgerStatement,
+  getTxTimestamp,
+  syncCustomerDueBalance
 } from '../../utils/ledgerManager';
+import { toast } from 'react-hot-toast';
 
 const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) => {
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(String(currentYear));
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (!shopId || !customer?.id) return;
@@ -34,8 +38,8 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
   // Detected years from transactions
   const detectedYears = [...new Set(
     transactions.map((t) => {
-      const d = new Date(t.date || t.createdAt?.toDate ? t.createdAt.toDate() : t.createdAt || 0);
-      return !isNaN(d.getTime()) ? String(d.getFullYear()) : String(currentYear);
+      const ts = getTxTimestamp(t);
+      return ts > 0 ? String(new Date(ts).getFullYear()) : String(currentYear);
     })
   )].sort((a, b) => Number(b) - Number(a));
 
@@ -45,9 +49,27 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
 
   const { openingBalance, closingBalance, statementRows } = computeLedgerStatement(
     transactions,
-    selectedYear,
-    customer?.dueAmount || 0
+    selectedYear
   );
+
+  // All-time exact balance from ledger transactions
+  const allTimeBalance = transactions.length > 0
+    ? computeLedgerStatement(transactions, 'all').closingBalance
+    : (Number(customer?.dueAmount) || 0);
+  const storedDue = Number(customer?.dueAmount) || 0;
+  const hasBalanceMismatch = transactions.length > 0 && Math.abs(storedDue - allTimeBalance) > 0.01;
+
+  const handleSyncBalance = async () => {
+    setSyncing(true);
+    try {
+      await syncCustomerDueBalance(shopId, customer.id, allTimeBalance);
+      toast.success(`বাকি হিসাব ${formatCurrency(allTimeBalance)} তে সমন্বয় করা হয়েছে!`);
+    } catch (err) {
+      toast.error('সমন্বয় করতে সমস্যা হয়েছে');
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   // Period stats
   const periodSales = statementRows
@@ -263,8 +285,28 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
               বর্তমান সমাপনী বাকি (Receivable)
             </span>
             <span style={{ fontSize: '18px', fontWeight: '900', color: '#dc2626' }}>
-              {formatCurrency(customer?.dueAmount || closingBalance)}
+              {formatCurrency(allTimeBalance)}
             </span>
+            {hasBalanceMismatch && (
+              <div style={{ marginTop: '4px' }}>
+                <button
+                  onClick={handleSyncBalance}
+                  disabled={syncing}
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: '700',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    padding: '2px 7px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {syncing ? 'সিঙ্ক হচ্ছে...' : `সমন্বয় করুন (পূর্বের ${formatCurrency(storedDue)} → ${formatCurrency(allTimeBalance)})`}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -331,6 +373,10 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
                           <div style={{ color: '#854d0e', display: 'flex', alignItems: 'center', gap: '4px' }}>
                             📌 <span>{row.title || 'পূর্বের জের'}</span>
                           </div>
+                        ) : row.type === 'opening_balance' ? (
+                          <span style={{ color: '#854d0e', fontWeight: '700', background: '#fef9c3', padding: '2px 8px', borderRadius: '12px', fontSize: '11px' }}>
+                            📌 প্রারম্ভিক বাকি জের
+                          </span>
                         ) : isSale ? (
                           <span style={{ color: '#b45309', fontWeight: '700', background: '#fef3c7', padding: '2px 8px', borderRadius: '12px', fontSize: '11px' }}>
                             🛍️ বাকিতে বিক্রয়

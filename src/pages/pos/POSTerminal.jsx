@@ -9,7 +9,8 @@ import {
   updateDoc,
   increment,
   serverTimestamp,
-  getDoc
+  getDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
@@ -434,53 +435,44 @@ const POSTerminal = () => {
         ? Math.max(0, customerPrevPoints + pointsEarned - pointsToRedeem)
         : (Number(selectedCustomer?.rewardPoints) || 0);
 
+      // 1. Fetch all cart products in parallel (1 round-trip instead of N sequential reads)
+      const productSnaps = await Promise.all(
+        cart.map((item) => getDoc(doc(db, 'shops', shopId, 'products', item.productId)).catch(() => null))
+      );
+
       // FIFO Batch Depletion: Compute exact batch allocations and COGS for each line item
       const finalizedItems = [];
       const productBatchUpdates = [];
 
-      for (const item of cart) {
+      cart.forEach((item, idx) => {
         let effectiveCost = Number(item.costPrice) || 0;
         let cogs = effectiveCost * (Number(item.quantity) || 0);
         let allocations = [];
         let updatedBatches = null;
 
-        try {
-          const pDocRef = doc(db, 'shops', shopId, 'products', item.productId);
-          const pSnap = await getDoc(pDocRef);
-          if (pSnap.exists()) {
-            const pData = pSnap.data();
-            const existingBatches = ensureProductBatches(pData);
-            const depletion = depleteBatchesFIFO(
-              existingBatches,
-              item.quantity,
-              effectiveCost || Number(pData.costPrice) || 0
-            );
+        const pDocRef = doc(db, 'shops', shopId, 'products', item.productId);
+        const pSnap = productSnaps[idx];
 
-            effectiveCost = depletion.unitCost;
-            cogs = depletion.totalCost;
-            allocations = depletion.allocations;
-            updatedBatches = depletion.updatedBatches;
+        if (pSnap && pSnap.exists()) {
+          const pData = pSnap.data();
+          const existingBatches = ensureProductBatches(pData);
+          const depletion = depleteBatchesFIFO(
+            existingBatches,
+            item.quantity,
+            effectiveCost || Number(pData.costPrice) || 0
+          );
 
-            productBatchUpdates.push({
-              ref: pDocRef,
-              qty: item.quantity,
-              batches: updatedBatches
-            });
-          } else {
-            productBatchUpdates.push({
-              ref: pDocRef,
-              qty: item.quantity,
-              batches: null
-            });
-          }
-        } catch (err) {
-          console.warn("FIFO batch calculation error for item:", item.productId, err);
-          productBatchUpdates.push({
-            ref: doc(db, 'shops', shopId, 'products', item.productId),
-            qty: item.quantity,
-            batches: null
-          });
+          effectiveCost = depletion.unitCost;
+          cogs = depletion.totalCost;
+          allocations = depletion.allocations;
+          updatedBatches = depletion.updatedBatches;
         }
+
+        productBatchUpdates.push({
+          ref: pDocRef,
+          qty: item.quantity,
+          batches: updatedBatches
+        });
 
         finalizedItems.push({
           ...item,
@@ -488,7 +480,7 @@ const POSTerminal = () => {
           cogs: cogs,
           batchAllocations: allocations
         });
-      }
+      });
 
       const saleData = {
         invoiceNo,
@@ -523,68 +515,65 @@ const POSTerminal = () => {
         createdAt: serverTimestamp()
       };
 
-      // 1. Save Sale to Firestore
-      const saleRef = await addDoc(collection(db, 'shops', shopId, 'sales'), saleData);
+      // 2. Execute Sale + Stock/Batch Updates + Customer Update + Customer Due Ledger in ONE atomic batch
+      const batch = writeBatch(db);
+      const saleRef = doc(collection(db, 'shops', shopId, 'sales'));
+      batch.set(saleRef, saleData);
 
-      // 1.1 Auto-credit payment to financial accounts
+      for (const update of productBatchUpdates) {
+        const updatePayload = {
+          stock: increment(-update.qty),
+          totalSold: increment(update.qty),
+          updatedAt: serverTimestamp()
+        };
+        if (update.batches) {
+          updatePayload.batches = update.batches;
+        }
+        batch.update(update.ref, updatePayload);
+      }
+
+      if (selectedCustomer?.id) {
+        const cDoc = doc(db, 'shops', shopId, 'customers', selectedCustomer.id);
+        const updateFields = {
+          totalPurchases: increment(grandTotal),
+          dueAmount: increment(actualDue),
+          updatedAt: serverTimestamp(),
+          lastTransactionAt: serverTimestamp()
+        };
+        if (isRetailSale) {
+          const pointsDiff = pointsEarned - pointsToRedeem;
+          updateFields.rewardPoints = increment(pointsDiff);
+        }
+        batch.update(cDoc, updateFields);
+
+        if (actualDue > 0) {
+          const custTxRef = doc(collection(db, 'shops', shopId, 'customer_transactions'));
+          batch.set(custTxRef, {
+            customerId: selectedCustomer.id,
+            customerName: selectedCustomer.name || 'সাধারণ ক্রেতা',
+            customerPhone: selectedCustomer.phone || '',
+            type: 'sale_due',
+            invoiceNo: invoiceNo,
+            billAmount: grandTotal,
+            paidAmount: actualPaid,
+            dueAmount: actualDue,
+            paymentMethod: paymentMethod,
+            note: (pricingTier === 'wholesale' ? 'পাইকারি বিক্রয় বাকি' : pricingTier === 'dealer' ? 'ডিলার বিক্রয় বাকি' : 'খুচরা বিক্রয় বাকি') + (paymentNote ? ` (${paymentNote})` : ''),
+            year: now.getFullYear(),
+            date: now.toISOString(),
+            recordedBy: userProfile?.name || userProfile?.email || 'Admin',
+            createdAt: serverTimestamp()
+          });
+        }
+      }
+
+      await batch.commit();
+
+      // 3. Auto-credit payment to financial accounts (non-blocking)
       if (actualPaid > 0) {
         creditAccountFromSale(shopId, paymentMethod, actualPaid).catch((err) => {
           console.warn("Auto-credit to financial account failed:", err);
         });
-      }
-
-      // 2. Decrement Products Stock and update FIFO Batches
-      for (const update of productBatchUpdates) {
-        try {
-          const updatePayload = {
-            stock: increment(-update.qty),
-            totalSold: increment(update.qty),
-            updatedAt: serverTimestamp()
-          };
-          if (update.batches) {
-            updatePayload.batches = update.batches;
-          }
-          await updateDoc(update.ref, updatePayload);
-        } catch (e) {
-          console.warn("Stock decrement & FIFO batch update error:", e);
-        }
-      }
-
-      // 3. Update Customer Stats & Loyalty Points (points diff ONLY for retail)
-      if (selectedCustomer?.id) {
-        try {
-          const cDoc = doc(db, 'shops', shopId, 'customers', selectedCustomer.id);
-          const updateFields = {
-            totalPurchases: increment(grandTotal),
-            dueAmount: increment(actualDue)
-          };
-          if (isRetailSale) {
-            const pointsDiff = pointsEarned - pointsToRedeem;
-            updateFields.rewardPoints = increment(pointsDiff);
-          }
-          await updateDoc(cDoc, updateFields);
-
-          // 3.1 Record customer due transaction in ledger if there is due
-          if (actualDue > 0) {
-            recordCustomerTransaction(shopId, {
-              customerId: selectedCustomer.id,
-              customerName: selectedCustomer.name || 'সাধারণ ক্রেতা',
-              customerPhone: selectedCustomer.phone || '',
-              type: 'sale_due',
-              invoiceNo: invoiceNo,
-              billAmount: grandTotal,
-              paidAmount: actualPaid,
-              dueAmount: actualDue,
-              paymentMethod: paymentMethod,
-              note: (pricingTier === 'wholesale' ? 'পাইকারি বিক্রয় বাকি' : pricingTier === 'dealer' ? 'ডিলার বিক্রয় বাকি' : 'খুচরা বিক্রয় বাকি') + (paymentNote ? ` (${paymentNote})` : ''),
-              recordedBy: userProfile?.name || userProfile?.email || 'Admin'
-            }).catch((err) => {
-              console.warn("Could not log customer due transaction:", err);
-            });
-          }
-        } catch (e) {
-          console.warn("Customer update error:", e);
-        }
       }
 
       toast.success('বিক্রয় সম্পন্ন হয়েছে!');

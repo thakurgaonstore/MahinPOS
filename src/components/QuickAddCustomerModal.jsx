@@ -49,7 +49,8 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
           paidAmount: 0,
           dueAmount: initDueNum,
           note: 'কাস্টমার প্রোফাইল তৈরির সময় পূর্বের বকেয়া জের',
-          recordedBy: 'Admin'
+          recordedBy: 'Admin',
+          skipEntityUpdate: true
         });
       }
 

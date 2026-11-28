@@ -106,7 +106,8 @@ const SupplierLedger = () => {
           dueAmount: initDueNum,
           note: 'সাপ্লায়ার খাতা খোলার সময় প্রারম্ভিক বকেয়া জের',
           voucherNo: 'INIT-DUE',
-          recordedBy: userProfile?.name || userProfile?.email || 'Admin'
+          recordedBy: userProfile?.name || userProfile?.email || 'Admin',
+          skipEntityUpdate: true
         });
       }
 
