@@ -103,6 +103,10 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
         cutoffDate = oneYearAgo.toISOString().slice(0, 10);
+      } else if (archiveMode === 'two_years_old') {
+        // Cutoff at Dec 31 of (currentYear - 2) so Opening Balance (B/F) lands cleanly on Jan 1 of next year
+        const cutoffYear = currentYear - 2;
+        cutoffDate = `${cutoffYear}-12-31`;
       } else if (archiveMode === 'custom_date') {
         if (!customCutoffDate) {
           toast.error('অনুগ্রহ করে শেষ তারিখ নির্বাচন করুন');
@@ -120,8 +124,8 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
       });
 
       toast.success(
-        `সফল! ${res.archivedCount} টি ইনভয়েস মুছে ডাটাবেস খালি হয়েছে এবং ${res.year} সালের আর্থিক সামারি স্থায়ীভাবে সংরক্ষিত হয়েছে!`,
-        { duration: 6000 }
+        `সফল! এক্সেল ফাইল (${res.backupFileName}) ডাউনলোড হয়েছে, ${res.archivedCount} টি ইনভয়েস ডিলিট হয়েছে এবং নতুন বছরের শুরুর তারিখে জের (B/F) সংরক্ষিত হয়েছে!`,
+        { duration: 7000 }
       );
 
       if (onSuccess) onSuccess();
@@ -217,8 +221,9 @@ const DataArchiveModal = ({ shopId, onClose, onSuccess }) => {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
               {[
                 { id: 'year', label: 'নির্দিষ্ট এক বছর (Year-wise)', desc: 'যেমন: ২০২৫ বা ২০২৪ সাল' },
-                { id: 'one_year_old', label: '১ বছরের পুরাতন সকল ইনভয়েস', desc: 'আজকের তারিখ থেকে ১ বছর আগের' },
-                { id: 'custom_date', label: 'নির্দিষ্ট তারিখের পূর্বের ইনভয়েস', desc: 'নির্দিষ্ট তারিখ পর্যন্ত' }
+                { id: 'two_years_old', label: '২ বছরের পুরাতন সকল ডাটা (এক্সেল + জের)', desc: `${currentYear - 2} সাল পর্যন্ত সব ডাটা এক্সেলে নিয়ে ডিলিট` },
+                { id: 'one_year_old', label: '১ বছরের পুরাতন সকল ডাটা', desc: 'আজকের তারিখ থেকে ১ বছর আগের' },
+                { id: 'custom_date', label: 'নির্দিষ্ট তারিখের পূর্বের ডাটা', desc: 'নির্দিষ্ট তারিখ পর্যন্ত' }
               ].map((opt) => (
                 <div
                   key={opt.id}

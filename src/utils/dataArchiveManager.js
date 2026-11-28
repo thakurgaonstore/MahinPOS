@@ -1,4 +1,5 @@
 import { db } from '../firebase/config';
+import * as XLSX from 'xlsx';
 import {
   collection,
   getDocs,
@@ -153,8 +154,13 @@ export async function archiveAndPurgeSales({
     }
   });
 
-  if (salesToArchive.length === 0) {
-    throw new Error("নির্বাচিত সময়কালের কোনো ইনভয়েস পাওয়া যায়নি।");
+  if (salesToArchive.length === 0 && expensesToArchive.length === 0) {
+    // Still check if ledgers or stock_logs have data before failing
+    const suppCheck = await getDocs(collection(db, 'shops', shopId, 'supplier_transactions'));
+    const custCheck = await getDocs(collection(db, 'shops', shopId, 'customer_transactions'));
+    if (suppCheck.empty && custCheck.empty) {
+      throw new Error("নির্বাচিত সময়কালের কোনো ইনভয়েস, খরচ বা লেজার লেনদেন পাওয়া যায়নি।");
+    }
   }
 
   if (onProgress) onProgress(`${salesToArchive.length} টি ইনভয়েসের আর্থিক সারসংক্ষেপ (Rollup) তৈরি হচ্ছে...`);
@@ -192,24 +198,134 @@ export async function archiveAndPurgeSales({
     updatedAt: serverTimestamp()
   }, { merge: true });
 
-  if (onProgress) onProgress("আপনার কম্পিউটারে পূর্ণাঙ্গ ব্যাকআপ JSON ফাইল ডাউনলোড হচ্ছে...");
+  // 5. Rollover Ledgers & Collect Stock Logs for Unified Excel Export
+  let ledgerResult = null;
+  try {
+    ledgerResult = await rolloverAndArchiveLedgers({
+      shopId,
+      targetYear: resolvedYear,
+      cutoffDate,
+      skipJsonDownload: true,
+      onProgress
+    });
+  } catch (err) {
+    console.warn("Ledger rollover notice:", err);
+  }
 
-  // 5. Trigger Automatic Full Backup Download
-  const backupFileName = `MahinPOS_Archive_Sales_${resolvedYear}_${new Date().toISOString().slice(0, 10)}.json`;
-  const archivePayload = {
-    platform: 'MahinPOS',
-    archiveType: 'Sales_And_Expenses_Purge_Archive',
-    shopId,
-    year: resolvedYear,
-    totalRecords: salesToArchive.length,
-    totalExpensesCount: expensesToArchive.length,
-    financialSummary: financialRollup,
-    invoices: salesToArchive,
-    expenses: expensesToArchive
-  };
-  downloadArchiveFile(archivePayload, backupFileName);
+  // Also fetch old stock_logs up to targetYear/cutoffDate
+  const stockLogsSnap = await getDocs(collection(db, 'shops', shopId, 'stock_logs'));
+  const stockLogsToArchive = [];
+  stockLogsSnap.forEach((docItem) => {
+    const data = docItem.data();
+    const timeVal = getTxTimestamp(data);
+    if (timeVal > 0) {
+      const docYear = String(new Date(timeVal).getFullYear());
+      if ((targetYear && docYear === String(targetYear)) || (cutoffTimestamp && timeVal <= cutoffTimestamp)) {
+        stockLogsToArchive.push({ id: docItem.id, ...data });
+      }
+    }
+  });
 
-  if (onProgress) onProgress(`ফায়ারবেস থেকে ${salesToArchive.length} টি ইনভয়েস ও ${expensesToArchive.length} টি খরচ ব্যাচ ডিলেট করা হচ্ছে...`);
+  if (onProgress) onProgress("সম্পূর্ণ ডাটা এক্সেল (.xlsx) ফাইলে ডাউনলোড হচ্ছে...");
+
+  // Generate Multi-Sheet Excel (.xlsx) Backup
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Financial Summary
+  const summarySheetData = [
+    { 'বিবরণ (Metric)': 'আর্কাইভকৃত বছর / সময়', 'মান (Value)': String(resolvedYear) },
+    { 'বিবরণ (Metric)': 'মোট ইনভয়েস সংখ্যা', 'মান (Value)': financialRollup.totalInvoices },
+    { 'বিবরণ (Metric)': 'মোট বিক্রয় (Gross Revenue)', 'মান (Value)': financialRollup.grossRevenue },
+    { 'বিবরণ (Metric)': 'মোট রিটার্ন (Returns)', 'মান (Value)': financialRollup.totalReturns },
+    { 'বিবরণ (Metric)': 'নিট বিক্রয় (Net Revenue)', 'মান (Value)': financialRollup.netRevenue },
+    { 'বিবরণ (Metric)': 'ক্রয় খরচ (COGS)', 'মান (Value)': financialRollup.totalCostOfGoods },
+    { 'বিবরণ (Metric)': 'মোট লাভ (Gross Profit)', 'মান (Value)': financialRollup.grossProfit },
+    { 'বিবরণ (Metric)': 'মোট দোকান খরচ (Expenses)', 'মান (Value)': financialRollup.totalExpenses },
+    { 'বিবরণ (Metric)': 'প্রকৃত নিট লাভ (Net Profit)', 'মান (Value)': financialRollup.netProfit }
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summarySheetData), 'Financial_Summary');
+
+  // Sheet 2: Sales Invoices
+  const salesSheetData = salesToArchive.map((s) => ({
+    'ইনভয়েস নং': s.invoiceNo || s.id,
+    'তারিখ': getTxTimestamp(s) ? new Date(getTxTimestamp(s)).toLocaleString('en-GB') : '',
+    'কাস্টমার': s.customerName || 'সাধারণ ক্রেতা',
+    'মোবাইল': s.customerPhone || '',
+    'সাবটোটাল': Number(s.subtotal) || 0,
+    'ডিসকাউন্ট': Number(s.discountAmount) || 0,
+    'মোট বিল': Number(s.grandTotal) || 0,
+    'পরিশোধ': Number(s.paidAmount) || 0,
+    'বাকি': Number(s.dueAmount) || 0,
+    'পেমেন্ট মেথড': s.paymentMethod || 'Cash'
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salesSheetData.length ? salesSheetData : [{ 'তথ্য': 'কোনো ইনভয়েস নেই' }]), 'Sales_Invoices');
+
+  // Sheet 3: Expenses
+  const expensesSheetData = expensesToArchive.map((e) => ({
+    'তারিখ': getTxTimestamp(e) ? new Date(getTxTimestamp(e)).toLocaleString('en-GB') : '',
+    'খরচের বিবরণ': e.title || '',
+    'ক্যাটাগরি': e.category || '',
+    'টাকা': Number(e.amount) || 0,
+    'পেমেন্ট মাধ্যম': e.paymentMethod || 'Cash',
+    'নোট': e.note || ''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(expensesSheetData.length ? expensesSheetData : [{ 'তথ্য': 'কোনো খরচ নেই' }]), 'Expenses');
+
+  // Sheet 4 & 5 & 6: Supplier Ledger, Customer Ledger, Opening Balances (B/F)
+  const suppTxRows = (ledgerResult?.suppTxToArchive || []).map((t) => ({
+    'তারিখ': getTxTimestamp(t) ? new Date(getTxTimestamp(t)).toLocaleString('en-GB') : '',
+    'মহাজন / সাপ্লায়ার': t.supplierName || '',
+    'ধরন': t.type || '',
+    'ভাউচার নং': t.voucherNo || '',
+    'চালান বিল': Number(t.billAmount) || 0,
+    'পরিশোধ': Number(t.paidAmount) || 0,
+    'বাকি পরিবর্তন': Number(t.dueAmount) || 0,
+    'নোট': t.note || ''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(suppTxRows.length ? suppTxRows : [{ 'তথ্য': 'কোনো মহাজন লেনদেন নেই' }]), 'Supplier_Ledger');
+
+  const custTxRows = (ledgerResult?.custTxToArchive || []).map((t) => ({
+    'তারিখ': getTxTimestamp(t) ? new Date(getTxTimestamp(t)).toLocaleString('en-GB') : '',
+    'কাস্টমার': t.customerName || '',
+    'মোবাইল': t.customerPhone || '',
+    'ধরন': t.type || '',
+    'ইনভয়েস নং': t.invoiceNo || '',
+    'বিক্রয় বিল': Number(t.billAmount) || 0,
+    'পরিশোধ': Number(t.paidAmount) || 0,
+    'বাকি পরিবর্তন': Number(t.dueAmount) || 0,
+    'নোট': t.note || ''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(custTxRows.length ? custTxRows : [{ 'তথ্য': 'কোনো কাস্টমার লেনদেন নেই' }]), 'Customer_Ledger');
+
+  const bfRows = [];
+  Object.values(ledgerResult?.supplierBalancesMap || {}).forEach((s) => {
+    if (Math.round(s.netDue * 100) / 100 !== 0) {
+      bfRows.push({ 'খাতা ধরন': 'মহাজন (Supplier)', 'নাম': s.supplierName, 'নতুন বছরের শুরুর জের (B/F)': Math.round(s.netDue * 100) / 100 });
+    }
+  });
+  Object.values(ledgerResult?.customerBalancesMap || {}).forEach((c) => {
+    if (Math.round(c.netDue * 100) / 100 !== 0) {
+      bfRows.push({ 'খাতা ধরন': 'কাস্টমার (Customer)', 'নাম': c.customerName, 'নতুন বছরের শুরুর জের (B/F)': Math.round(c.netDue * 100) / 100 });
+    }
+  });
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(bfRows.length ? bfRows : [{ 'তথ্য': 'কোনো প্রারম্ভিক জের নেই' }]), 'Opening_Balances_BF');
+
+  // Sheet 7: Stock Restock Logs
+  const stockSheetData = stockLogsToArchive.map((l) => ({
+    'তারিখ': getTxTimestamp(l) ? new Date(getTxTimestamp(l)).toLocaleString('en-GB') : '',
+    'পণ্যের নাম': l.productName || '',
+    'পরিমাণ': Number(l.addedQuantity) || 0,
+    'ক্রয় দর': Number(l.purchaseCostPrice) || 0,
+    'মোট খরচ': Number(l.batchTotalCost) || 0,
+    'মহাজন': l.supplierName || '',
+    'ভাউচার': l.voucherNo || ''
+  }));
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(stockSheetData.length ? stockSheetData : [{ 'তথ্য': 'কোনো রিস্টক লগ নেই' }]), 'Stock_Restock_Logs');
+
+  const backupFileName = `MahinPOS_Archive_${resolvedYear}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  XLSX.writeFile(wb, backupFileName);
+
+  if (onProgress) onProgress(`ডাটাবেস থেকে ${salesToArchive.length} টি ইনভয়েস, ${expensesToArchive.length} টি খরচ ও ${stockLogsToArchive.length} টি রিস্টক লগ ডিলিট করা হচ্ছে...`);
 
   // 6. Delete raw documents in batches of 400 (Firestore limit is 500 per batch)
   const batchSize = 400;
@@ -223,7 +339,6 @@ export async function archiveAndPurgeSales({
     if (onProgress) onProgress(`${Math.min(i + batchSize, salesToArchive.length)} / ${salesToArchive.length} টি ইনভয়েস সম্পন্ন...`);
   }
 
-  // Delete raw expenses in batches as well to free database
   for (let i = 0; i < expensesToArchive.length; i += batchSize) {
     const chunk = expensesToArchive.slice(i, i + batchSize);
     const batch = writeBatch(db);
@@ -233,17 +348,13 @@ export async function archiveAndPurgeSales({
     await batch.commit();
   }
 
-  // 7. Rollover & Archive Ledgers (পূর্বের জের টানা ও লেজার ট্রানজ্যাকশন আর্কাইভ)
-  let ledgerResult = null;
-  try {
-    ledgerResult = await rolloverAndArchiveLedgers({
-      shopId,
-      targetYear: resolvedYear,
-      cutoffDate,
-      onProgress
+  for (let i = 0; i < stockLogsToArchive.length; i += batchSize) {
+    const chunk = stockLogsToArchive.slice(i, i + batchSize);
+    const batch = writeBatch(db);
+    chunk.forEach((l) => {
+      batch.delete(doc(db, 'shops', shopId, 'stock_logs', l.id));
     });
-  } catch (err) {
-    console.warn("Ledger rollover notice:", err);
+    await batch.commit();
   }
 
   return {
@@ -265,6 +376,7 @@ export async function rolloverAndArchiveLedgers({
   shopId,
   targetYear,
   cutoffDate,
+  skipJsonDownload = false,
   onProgress
 }) {
   if (!shopId) throw new Error("Shop ID প্রয়োজন");
@@ -377,9 +489,9 @@ export async function rolloverAndArchiveLedgers({
     }
   }
 
-  // 5. Download Backup JSON of Ledger Transactions (if any existed)
+  // 5. Download Backup JSON of Ledger Transactions (if requested)
   let ledgerBackupFileName = null;
-  if (suppTxToArchive.length > 0 || custTxToArchive.length > 0) {
+  if (!skipJsonDownload && (suppTxToArchive.length > 0 || custTxToArchive.length > 0)) {
     ledgerBackupFileName = `MahinPOS_Ledger_Archive_${resolvedYear}_${new Date().toISOString().slice(0, 10)}.json`;
     const ledgerPayload = {
       platform: 'MahinPOS',
@@ -426,6 +538,10 @@ export async function rolloverAndArchiveLedgers({
     archivedCustomerTxCount: custTxToArchive.length,
     suppliersCount: Object.keys(supplierBalancesMap).length,
     customersCount: Object.keys(customerBalancesMap).length,
-    ledgerBackupFileName
+    ledgerBackupFileName,
+    suppTxToArchive,
+    custTxToArchive,
+    supplierBalancesMap,
+    customerBalancesMap
   };
 }
