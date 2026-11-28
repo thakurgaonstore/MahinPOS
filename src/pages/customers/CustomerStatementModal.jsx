@@ -96,7 +96,7 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
       padding: '16px',
       backdropFilter: 'blur(3px)'
     }}>
-      <div style={{
+      <div className="print-area" style={{
         background: '#ffffff',
         width: '100%',
         maxWidth: '900px',
@@ -116,7 +116,7 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
           paddingBottom: '14px'
         }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{
                 background: '#eff6ff',
                 color: '#2563eb',
@@ -141,7 +141,7 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button
               onClick={handlePrint}
               title="স্টেটমেন্ট প্রিন্ট করুন"
@@ -190,7 +190,7 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
           flexWrap: 'wrap',
           gap: '10px'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '13px', fontWeight: '700', color: '#334155' }}>
               হিসাবের অর্থবছর / সাল:
             </span>
@@ -218,6 +218,7 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
 
           {onOpenPayment && (
             <button
+              className="no-print"
               onClick={() => {
                 onClose();
                 onOpenPayment(customer);
@@ -426,7 +427,7 @@ const CustomerStatementModal = ({ shopId, customer, onClose, onOpenPayment }) =>
         </div>
 
         {/* Footer */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             onClick={onClose}
             style={{
