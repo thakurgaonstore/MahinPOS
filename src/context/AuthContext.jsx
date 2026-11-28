@@ -2,11 +2,12 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { 
   signInWithEmailAndPassword, 
+  signInAnonymously,
   signOut, 
   onAuthStateChanged 
 } from 'firebase/auth';
 import { doc, getDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
-import { auth, db, defaultDb, getDedicatedTenantFirebase, switchActiveTenantDb, resetActiveTenantDb } from '../firebase/config';
+import { auth, db, defaultDb, getActiveAuth, getDedicatedTenantFirebase, switchActiveTenantDb, resetActiveTenantDb } from '../firebase/config';
 import { verifyPassword } from '../utils/cryptoHelper';
 
 const AuthContext = createContext();
@@ -149,6 +150,13 @@ export const AuthProvider = ({ children }) => {
 
       if (!verification.matches) {
         return { success: false, message: 'ভুল পাসওয়ার্ড! অনুগ্রহ করে সঠিক পাসওয়ার্ড দিন।' };
+      }
+
+      // Establish Firebase Auth session so strict firestore.rules work for staff too
+      try {
+        await signInAnonymously(getActiveAuth());
+      } catch (anonErr) {
+        console.warn("Anonymous auth notice (enable Anonymous Sign-In in Firebase Console for staff rules):", anonErr?.code);
       }
 
       // Staff authenticated!

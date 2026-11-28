@@ -1,25 +1,44 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // All authenticated users (Super Admin, Shop Owners, Staff) can read and write
-    // Public POS/Domain resolution can read shop configurations
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // 1. Shop Metadata & Public Domain Resolution
     match /shops/{shopId} {
-      allow read: if true;
-      allow write: if request.auth != null;
-      
+      // Allow single-doc get or limited domain lookup before login
+      allow get: if true;
+      allow list: if isSignedIn() || (request.query.limit != null && request.query.limit <= 5);
+      allow create, update, delete: if isSignedIn();
+
+      // 1.1 Staff Collection (allow single-record phone lookup during staff login)
+      match /staff/{staffId} {
+        allow get: if isSignedIn();
+        allow list: if isSignedIn() || (request.query.limit != null && request.query.limit <= 1);
+        allow write: if isSignedIn();
+      }
+
+      // 1.2 All Sensitive Business Subcollections (sales, products, customers, suppliers, ledgers, accounts, expenses, payroll)
       match /{subcollection}/{document=**} {
-        allow read: if true;
-        allow write: if request.auth != null;
+        allow read, write: if isSignedIn();
       }
     }
 
+    // 2. Platform / Super Admin Configs (SMS Gateway, Cloudinary, Broadcasts)
     match /platform/{document=**} {
-      allow read: if true;
-      allow write: if request.auth != null;
+      allow read, write: if isSignedIn();
     }
 
+    // 3. User Profiles (strictly own profile)
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 4. Deny all other unauthenticated or unspecified access
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }
