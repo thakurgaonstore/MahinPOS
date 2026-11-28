@@ -79,7 +79,11 @@ export function addBatchToProduct(existingBatches = [], {
     notes: String(notes || '').trim()
   };
 
-  return [...currentList, newBatch];
+  const combined = [...currentList, newBatch];
+  const active = combined.filter((b) => (Number(b.remainingQty) || 0) > 0);
+  const depleted = combined.filter((b) => (Number(b.remainingQty) || 0) <= 0).slice(-10);
+
+  return [...depleted, ...active];
 }
 
 /**
@@ -160,8 +164,12 @@ export function depleteBatchesFIFO(existingBatches = [], quantityToDeplete, fall
   const roundedTotalCost = Math.round(totalCost * 100) / 100;
   const unitCost = targetQty > 0 ? Math.round((roundedTotalCost / targetQty) * 100) / 100 : fallbackCost;
 
+  // Keep all active batches + at most 10 latest depleted batches to prevent product doc bloat over years
+  const activeBatches = batches.filter((b) => (Number(b.remainingQty) || 0) > 0);
+  const depletedBatches = batches.filter((b) => (Number(b.remainingQty) || 0) <= 0).slice(-10);
+
   return {
-    updatedBatches: batches,
+    updatedBatches: [...depletedBatches, ...activeBatches],
     totalCost: roundedTotalCost,
     unitCost,
     allocations

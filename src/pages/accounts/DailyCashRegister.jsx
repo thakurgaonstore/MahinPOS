@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../context/AuthContext';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
@@ -31,31 +31,29 @@ const DailyCashRegister = () => {
   useEffect(() => {
     if (!shopId) return;
 
-    // Real-time sales (today's only)
-    const unsubSales = onSnapshot(collection(db, 'shops', shopId, 'sales'), (snap) => {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todayTimestamp = Timestamp.fromDate(startOfToday);
+
+    // Real-time sales (server-filtered for today's only — zero historical reads)
+    const qSales = query(
+      collection(db, 'shops', shopId, 'sales'),
+      where('createdAt', '>=', todayTimestamp)
+    );
+    const unsubSales = onSnapshot(qSales, (snap) => {
       const list = [];
-      const todayStr = new Date().toDateString();
-      snap.forEach((d) => {
-        const data = d.data();
-        const date = data.createdAt?.toDate ? data.createdAt.toDate() : new Date();
-        if (date.toDateString() === todayStr) {
-          list.push(data);
-        }
-      });
+      snap.forEach((d) => list.push(d.data()));
       setSales(list);
     });
 
-    // Real-time expenses (today's only)
-    const unsubExp = onSnapshot(collection(db, 'shops', shopId, 'expenses'), (snap) => {
+    // Real-time expenses (server-filtered for today's only — zero historical reads)
+    const qExp = query(
+      collection(db, 'shops', shopId, 'expenses'),
+      where('createdAt', '>=', todayTimestamp)
+    );
+    const unsubExp = onSnapshot(qExp, (snap) => {
       const list = [];
-      const todayStr = new Date().toDateString();
-      snap.forEach((d) => {
-        const data = d.data();
-        const date = data.createdAt?.toDate ? data.createdAt.toDate() : new Date();
-        if (date.toDateString() === todayStr) {
-          list.push(data);
-        }
-      });
+      snap.forEach((d) => list.push(d.data()));
       setExpenses(list);
     });
 

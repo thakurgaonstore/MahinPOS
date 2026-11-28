@@ -114,10 +114,11 @@ const DashboardHome = () => {
       setStaffList(list);
     });
 
-    // Realtime Expenses (Owner/Manager only)
+    // Realtime Expenses (Owner/Manager only, limited to latest 100 for Spark plan quota)
     let unsubExp = () => {};
     if (!isSalesStaff) {
-      unsubExp = onSnapshot(collection(db, 'shops', shopId, 'expenses'), (snap) => {
+      const qExp = query(collection(db, 'shops', shopId, 'expenses'), orderBy('createdAt', 'desc'), limit(100));
+      unsubExp = onSnapshot(qExp, (snap) => {
         const list = [];
         snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
         setExpenses(list);

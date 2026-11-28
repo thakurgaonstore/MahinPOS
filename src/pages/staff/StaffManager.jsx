@@ -130,40 +130,35 @@ const StaffManager = () => {
     return () => unsub();
   }, [shopId]);
 
-  // 2. Realtime Daily Attendance for selected date
+  // 2. Realtime Daily Attendance for selected date (server-filtered)
   useEffect(() => {
     if (!shopId || !selectedDate) return;
-    const unsub = onSnapshot(collection(db, 'shops', shopId, 'attendance'), (snap) => {
+    const qAtt = query(collection(db, 'shops', shopId, 'attendance'), where('date', '==', selectedDate));
+    const unsub = onSnapshot(qAtt, (snap) => {
       const records = {};
       snap.forEach((d) => {
         const data = d.data();
-        if (data.date === selectedDate) {
-          records[data.staffId] = data.status;
-        }
+        records[data.staffId] = data.status;
       });
       setAttendanceRecords(records);
     });
     return () => unsub();
   }, [shopId, selectedDate]);
 
-  // 3. Realtime Payroll & Advances
+  // 3. Realtime Payroll & Advances (server-filtered for selectedMonth)
   useEffect(() => {
     if (!shopId || !selectedMonth) return;
-    const unsubPay = onSnapshot(collection(db, 'shops', shopId, 'payroll'), (snap) => {
+    const qPay = query(collection(db, 'shops', shopId, 'payroll'), where('month', '==', selectedMonth));
+    const unsubPay = onSnapshot(qPay, (snap) => {
       const list = [];
-      snap.forEach((d) => {
-        const data = { id: d.id, ...d.data() };
-        if (data.month === selectedMonth) list.push(data);
-      });
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setPayrollRecords(list);
     });
 
-    const unsubAdv = onSnapshot(collection(db, 'shops', shopId, 'advances'), (snap) => {
+    const qAdv = query(collection(db, 'shops', shopId, 'advances'), where('month', '==', selectedMonth));
+    const unsubAdv = onSnapshot(qAdv, (snap) => {
       const list = [];
-      snap.forEach((d) => {
-        const data = { id: d.id, ...d.data() };
-        if (data.month === selectedMonth) list.push(data);
-      });
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
       setAdvanceRecords(list);
     });
 
