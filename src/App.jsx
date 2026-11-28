@@ -43,6 +43,7 @@ const CustomerManager = lazy(() => import('./pages/customers/CustomerManager'));
 const CustomerDueLedger = lazy(() => import('./pages/customers/CustomerDueLedger'));
 const SupplierLedger = lazy(() => import('./pages/accounts/SupplierLedger'));
 const DailyCashRegister = lazy(() => import('./pages/accounts/DailyCashRegister'));
+const NotificationCenter = lazy(() => import('./pages/notifications/NotificationCenter'));
 const StaffManager = lazy(() => import('./pages/staff/StaffManager'));
 const ShopSettings = lazy(() => import('./pages/settings/ShopSettings'));
 
@@ -126,6 +127,7 @@ function App() {
                   <Route path="customer-dues" element={<CustomerDueLedger />} />
                   <Route path="suppliers" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'manager', 'accountant']}><SupplierLedger /></ProtectedRoute>} />
                   <Route path="cash-register" element={<DailyCashRegister />} />
+                  <Route path="notifications" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'manager', 'accountant']}><NotificationCenter /></ProtectedRoute>} />
                   <Route path="staff" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin']}><StaffManager /></ProtectedRoute>} />
                   <Route path="settings" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin']}><ShopSettings /></ProtectedRoute>} />
                 </Route>

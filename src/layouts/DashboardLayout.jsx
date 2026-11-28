@@ -27,7 +27,8 @@ import {
   MdFullscreenExit,
   MdAdminPanelSettings,
   MdAssignmentReturn,
-  MdRequestQuote
+  MdRequestQuote,
+  MdNotificationsActive
 } from 'react-icons/md';
 
 const DashboardLayout = () => {
@@ -131,6 +132,7 @@ const DashboardLayout = () => {
     { name: 'কাস্টমার বাকি খাতা (Due)', path: '/dashboard/customer-dues', icon: <MdRequestQuote />, show: true },
     { name: 'মহাজন / সাপ্লায়ার খাতা', path: '/dashboard/suppliers', icon: <MdLocalShipping />, show: isManager || isAccountant },
     { name: 'দৈনিক ক্যাশ খাতা', path: '/dashboard/cash-register', icon: <MdPayments />, show: true },
+    { name: 'নোটিফিকেশন ও SMS', path: '/dashboard/notifications', icon: <MdNotificationsActive />, show: isManager || isAccountant },
     { name: 'স্টাফ ও পেরোল (HR)', path: '/dashboard/staff', icon: <MdManageAccounts />, show: isOwner },
     { name: 'দোকান সেটিংস', path: '/dashboard/settings', icon: <MdSettings />, show: isOwner },
   ];

@@ -22,6 +22,7 @@ import InvoiceViewModal from '../invoices/InvoiceViewModal';
 import { creditAccountFromSale } from '../../utils/financialAccountsManager';
 import { ensureProductBatches, depleteBatchesFIFO } from '../../utils/fifoInventoryManager';
 import { recordCustomerTransaction } from '../../utils/ledgerManager';
+import { sendShopSMS } from '../../utils/smsHelper';
 
 // Icons
 import {
@@ -573,6 +574,32 @@ const POSTerminal = () => {
       if (actualPaid > 0) {
         creditAccountFromSale(shopId, paymentMethod, actualPaid).catch((err) => {
           console.warn("Auto-credit to financial account failed:", err);
+        });
+      }
+
+      // 3.1 Auto-send Invoice SMS if enabled in Notification Settings (non-blocking)
+      const notifSettings = shopConfig?.notificationSettings;
+      if (
+        notifSettings?.invoiceSmsEnabled &&
+        selectedCustomer?.phone &&
+        selectedCustomer.phone.trim().length >= 10 &&
+        (!notifSettings.invoiceSmsOnlyWithDue || actualDue > 0)
+      ) {
+        const defaultTpl = 'ধন্যবাদ {customerName}! {shopName} থেকে আপনার বিল #{invoiceNo} মোট {grandTotal}৳ (জমা: {paidAmount}৳, বাকি: {dueAmount}৳)।';
+        let smsText = notifSettings.invoiceSmsTemplate || defaultTpl;
+        const vars = {
+          customerName: selectedCustomer.name || 'গ্রাহক',
+          shopName: shopConfig?.shopName || userProfile?.shopName || 'Mahin Shop',
+          invoiceNo,
+          grandTotal: Math.round(grandTotal * 100) / 100,
+          paidAmount: Math.round(actualPaid * 100) / 100,
+          dueAmount: Math.round(actualDue * 100) / 100
+        };
+        Object.keys(vars).forEach((k) => {
+          smsText = smsText.split(`{${k}}`).join(String(vars[k]));
+        });
+        sendShopSMS(shopId, selectedCustomer.phone, smsText, `Invoice #${invoiceNo}`).catch((err) => {
+          console.warn("Auto Invoice SMS failed:", err);
         });
       }
 
