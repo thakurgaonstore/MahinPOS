@@ -26,7 +26,8 @@ import {
   MdFullscreen,
   MdFullscreenExit,
   MdAdminPanelSettings,
-  MdAssignmentReturn
+  MdAssignmentReturn,
+  MdRequestQuote
 } from 'react-icons/md';
 
 const DashboardLayout = () => {
@@ -127,6 +128,7 @@ const DashboardLayout = () => {
     { name: 'হিসাব ও লাভ-ক্ষতি', path: '/dashboard/accounts', icon: <MdAccountBalance />, show: isAccountant },
     { name: 'খরচের খাতা', path: '/dashboard/expenses', icon: <MdReceipt />, show: isAccountant || isManager },
     { name: 'গ্রাহক ও লয়্যালটি পয়েন্ট', path: '/dashboard/customers', icon: <MdPeople />, show: true },
+    { name: 'কাস্টমার বাকি খাতা (Due)', path: '/dashboard/customer-dues', icon: <MdRequestQuote />, show: true },
     { name: 'মহাজন / সাপ্লায়ার খাতা', path: '/dashboard/suppliers', icon: <MdLocalShipping />, show: isManager || isAccountant },
     { name: 'দৈনিক ক্যাশ খাতা', path: '/dashboard/cash-register', icon: <MdPayments />, show: true },
     { name: 'স্টাফ ও পেরোল (HR)', path: '/dashboard/staff', icon: <MdManageAccounts />, show: isOwner },

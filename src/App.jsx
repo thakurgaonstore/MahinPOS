@@ -40,6 +40,7 @@ const BarcodePrintCenter = lazy(() => import('./pages/inventory/BarcodePrintCent
 const AccountsDashboard = lazy(() => import('./pages/accounts/AccountsDashboard'));
 const ExpenseManager = lazy(() => import('./pages/accounts/ExpenseManager'));
 const CustomerManager = lazy(() => import('./pages/customers/CustomerManager'));
+const CustomerDueLedger = lazy(() => import('./pages/customers/CustomerDueLedger'));
 const SupplierLedger = lazy(() => import('./pages/accounts/SupplierLedger'));
 const DailyCashRegister = lazy(() => import('./pages/accounts/DailyCashRegister'));
 const StaffManager = lazy(() => import('./pages/staff/StaffManager'));
@@ -122,6 +123,7 @@ function App() {
                   <Route path="accounts" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'accountant']}><AccountsDashboard /></ProtectedRoute>} />
                   <Route path="expenses" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'accountant', 'manager']}><ExpenseManager /></ProtectedRoute>} />
                   <Route path="customers" element={<CustomerManager />} />
+                  <Route path="customer-dues" element={<CustomerDueLedger />} />
                   <Route path="suppliers" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin', 'manager', 'accountant']}><SupplierLedger /></ProtectedRoute>} />
                   <Route path="cash-register" element={<DailyCashRegister />} />
                   <Route path="staff" element={<ProtectedRoute allowedRoles={['super_admin', 'shop_admin']}><StaffManager /></ProtectedRoute>} />
