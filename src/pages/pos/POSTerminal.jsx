@@ -1568,8 +1568,10 @@ const POSTerminal = () => {
             background: '#ffffff',
             width: '100%',
             maxWidth: '480px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
             borderRadius: '16px',
-            padding: '24px',
+            padding: '20px 24px',
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>

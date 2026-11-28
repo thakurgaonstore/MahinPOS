@@ -80,8 +80,10 @@ const QuickAddCustomerModal = ({ shopId, onClose, onCustomerAdded, initialPhone 
         background: '#ffffff',
         width: '100%',
         maxWidth: '420px',
+        maxHeight: '90vh',
+        overflowY: 'auto',
         borderRadius: '14px',
-        padding: '24px',
+        padding: '20px 24px',
         boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>

@@ -287,8 +287,8 @@ const CustomerManager = () => {
 
       {/* Due Collection Modal */}
       {selectedCustForDue && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
-          <div style={{ background: '#ffffff', width: '100%', maxWidth: '420px', borderRadius: '14px', padding: '24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '12px' }}>
+          <div style={{ background: '#ffffff', width: '100%', maxWidth: '420px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '14px', padding: '20px 24px', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
               <h3 style={{ fontSize: '18px', fontWeight: '800', margin: 0, color: '#0f172a' }}>বাকি টাকা আদায়</h3>
               <button onClick={() => setSelectedCustForDue(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b' }}>

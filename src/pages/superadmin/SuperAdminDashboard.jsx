@@ -1622,7 +1622,7 @@ const SuperAdminDashboard = () => {
           justifyContent: 'center',
           padding: '16px'
         }}>
-          <div style={{ background: '#fff', width: '100%', maxWidth: '440px', borderRadius: '14px', padding: '24px', boxShadow: '0 20px 40px rgba(0,0,0,0.3)' }}>
+          <div style={{ background: '#fff', width: '100%', maxWidth: '440px', maxHeight: '90vh', overflowY: 'auto', borderRadius: '14px', padding: '20px 24px', boxShadow: '0 20px 40px rgba(0,0,0,0.3)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 style={{ fontSize: '17px', fontWeight: '800', margin: 0, color: '#0f172a' }}>
                 💬 এসএমএস কোটা বরাদ্দ ও নিয়ন্ত্রণ
@@ -1895,7 +1895,9 @@ const SuperAdminDashboard = () => {
             borderRadius: '16px',
             width: '100%',
             maxWidth: '520px',
-            padding: '24px',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            padding: '20px 24px',
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
             border: '1px solid #e2e8f0'
           }}>
